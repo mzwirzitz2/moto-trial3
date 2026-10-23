@@ -4,10 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Moto Trial</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f5fbf">
+<link rel="icon" type="image/png" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Moto Trial">
 <style>
   html, body { margin: 0; height: 100%; background: #fbfaf4; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", system-ui, sans-serif; }
   canvas { display: block; width: 100vw; height: 100vh; }
-  #hud { position: fixed; top: 12px; left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; color: #333; font-size: 20px; }
+  #hud { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right)); display: flex; justify-content: space-between; pointer-events: none; color: #333; font-size: 20px; }
   #hud .box { background: rgba(255,255,255,.85); border: 2px solid #444; border-radius: 10px; padding: 6px 12px; box-shadow: 2px 3px 0 #4443; }
   #speed { width: 180px; }
   #speedbar { height: 10px; border: 2px solid #444; border-radius: 6px; margin-top: 4px; overflow: hidden; background: #eee; }
@@ -22,6 +30,7 @@
   .hidden { display: none !important; }
   #panel { max-height: 92vh; overflow-y: auto; -webkit-overflow-scrolling: touch; pointer-events: none; }
   #panel.interactive { pointer-events: auto; }
+  #panel.crashed button { pointer-events: auto; }
   #panel h1 { margin-bottom: 4px; }
   .mtabs { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
   #panel button.mt, #panel button.big, #panel button.lv, #panel button.item { pointer-events: auto; font: inherit; cursor: pointer; border: 2px solid #333; border-radius: 10px; background: #fff; color: #333; box-shadow: 2px 3px 0 #3334; }
@@ -84,6 +93,7 @@
   <div class="box" id="stats">🪙 0/0 · ⏱ 0.0s · 💥 0</div>
   <div class="right">
     <div class="box" id="speed">Tempo: <span id="speedtxt">0</span><div id="speedbar"><div id="speedfill"></div></div></div>
+    <button id="menu" title="Level-Übersicht (Esc)">☰</button>
     <button id="mute" title="Ton an/aus (M)">🔊</button>
     <button id="restart" title="Neu starten (R)">↺</button>
   </div>
@@ -173,6 +183,7 @@
     if (map[e.key]) { held.add(e.key); syncKeys(); e.preventDefault(); if (S.status === 'ready') start(); }
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); proceed(); }
     if (e.key === 'r' || e.key === 'R') restart();
+    if (e.key === 'Escape') toMenu();
     if (/^[0-9]$/.test(e.key) && S.status !== 'run') { const n = e.key === '0' ? 10 : Number(e.key); if (n <= MotoTrial.levelCount) loadLevel(n - 1); }
     if (e.key === 'm' || e.key === 'M') toggleMute();
   });
@@ -194,6 +205,8 @@
   function restart() { game.reset(true); finishedRecord = null; start(); }
   function toggleMute() { muted = !muted; if (engGain) engGain.gain.value = 0; $('mute').textContent = muted ? '🔇' : '🔊'; }
   $('restart').addEventListener('click', e => { e.stopPropagation(); initAudio(); restart(); });
+  $('menu').addEventListener('click', e => { e.stopPropagation(); initAudio(); toMenu(); });
+  function toMenu() { menuTab = 'levels'; crashBike = null; game.reset(true); pointers.clear(); held.clear(); syncKeys(); updatePanel(); }
   $('mute').addEventListener('click', e => { e.stopPropagation(); initAudio(); toggleMute(); });
 
   function start() { if (S.status === 'ready') { S.status = 'run'; finishedRecord = null; } crashBike = null; updatePanel(); }
@@ -285,6 +298,20 @@
     return items.join('');
   }
 
+  // ---------- install as app (PWA) ----------
+  let installPrompt = null;
+  const standalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (S && S.status === 'ready') updatePanel(); });
+  addEventListener('appinstalled', () => { installPrompt = null; if (S && S.status === 'ready') updatePanel(); });
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  function installHtml() {
+    if (standalone()) return '';
+    if (installPrompt) return '<p><button class="mt" id="installBtn">📲 Als App installieren</button></p>';
+    if (isIOS) return '<p class="hint">📲 Als App: in Safari <b>Teilen</b> ⬆️ → <b>Zum Home-Bildschirm</b></p>';
+    return '';
+  }
+
   // ---------- overlay ----------
   let menuTab = 'levels', scoreLevel = 0, lastEarned = 0, finishedRecord = null;
   const total = () => coins.reduce((a, c) => a + c.v, 0);
@@ -307,7 +334,7 @@
       ${intro}<div class="legend">${legendFor(L)}</div>
       <p class="only-keys"><kbd>→</kbd> Gas &nbsp; <kbd>←</kbd> Bremse / rückwärts &nbsp; (oder <kbd>↑</kbd> / <kbd>↓</kbd>)</p>
       <p class="only-touch">Rechts halten = <b>Gas</b> · Links halten = <b>Bremse</b>, im Stand <b>rückwärts</b></p>
-      <p><button class="big" id="startBtn">▶ Start <span class="only-keys">(Enter)</span></button></p>`;
+      <p><button class="big" id="startBtn">▶ Start <span class="only-keys">(Enter)</span></button></p>${installHtml()}`;
   }
   function scoresHtml() {
     const list = results[scoreLevel] || [];
@@ -336,6 +363,7 @@
   function bindMenu(p) {
     p.querySelectorAll('.mt[data-tab]').forEach(b => b.onclick = e => { e.stopPropagation(); menuTab = b.dataset.tab; scoreLevel = levelIndex; updatePanel(); });
     p.querySelectorAll('.lv').forEach(b => b.onclick = e => { e.stopPropagation(); initAudio(); loadLevel(Number(b.dataset.level)); });
+    const ib = $('installBtn'); if (ib) ib.onclick = async e => { e.stopPropagation(); if (!installPrompt) return; installPrompt.prompt(); try { await installPrompt.userChoice; } catch (err) {} installPrompt = null; updatePanel(); };
     const sb = $('startBtn'); if (sb) sb.onclick = e => { e.stopPropagation(); initAudio(); start(); };
     const pl = $('prevL'), nl = $('nextL');
     if (pl) pl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + MotoTrial.levelCount - 1) % MotoTrial.levelCount; updatePanel(); };
@@ -352,7 +380,7 @@
     });
     const nb = $('nextLevel'); if (nb) nb.onclick = e => { e.stopPropagation(); initAudio(); nextLevel(); };
     const rb = $('replay'); if (rb) rb.onclick = e => { e.stopPropagation(); initAudio(); game.reset(true); start(); };
-    const mb = $('toMenu'); if (mb) mb.onclick = e => { e.stopPropagation(); game.reset(true); updatePanel(); };
+    const mb = $('toMenu'); if (mb) mb.onclick = e => { e.stopPropagation(); toMenu(); };
   }
   function nextLevel() {
     if (levelIndex + 1 < MotoTrial.levelCount) { menuTab = 'levels'; loadLevel(levelIndex + 1); }
@@ -372,12 +400,15 @@
     if (S.status === 'run') { ov.classList.add('hidden'); return; }
     ov.classList.remove('hidden');
     p.classList.toggle('interactive', S.status !== 'crash');
+    p.classList.toggle('crashed', S.status === 'crash');
     if (S.status === 'ready') {
       p.innerHTML = `<h1>🏍️ Moto Trial</h1>${tabsHtml()}` + (menuTab === 'levels' ? levelsHtml() : menuTab === 'scores' ? scoresHtml() : garageHtml());
       bindMenu(p);
     } else if (S.status === 'crash') {
       p.innerHTML = `<h2>💥 ${S.msg}</h2>
-        <p><span class="only-keys"><kbd>Enter</kbd></span><span class="only-touch">Tippen:</span> ${S.checkpoint ? 'weiter ab Checkpoint 🚩' : 'nochmal versuchen'} &nbsp; · &nbsp; <span class="only-keys"><kbd>R</kbd></span><span class="only-touch">↺ oben rechts:</span> ganz neu starten</p>`;
+        <p><span class="only-keys"><kbd>Enter</kbd></span><span class="only-touch">Tippen:</span> ${S.checkpoint ? 'weiter ab Checkpoint 🚩' : 'nochmal versuchen'} &nbsp; · &nbsp; <span class="only-keys"><kbd>R</kbd></span><span class="only-touch">↺ oben rechts:</span> ganz neu starten</p>
+        <p><button class="mt" id="toMenu">☰ Level-Übersicht</button></p>`;
+      bindMenu(p);
     } else if (S.status === 'finish') {
       if (!finishedRecord) recordFinish();
       const { rank, r } = finishedRecord, tot = total();
