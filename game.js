@@ -318,7 +318,7 @@
     const last = () => B.p.pts[B.p.pts.length - 1];
     const X = () => last()[0], Y = () => last()[1];
     const later = f => B.pending.push(f);
-    const hint = h => { B.hints.push(h); later(gi => { if (h.gi === undefined) h.gi = gi; }); return h; };
+    const hint = h => { if (B.guard !== undefined) h.x0 = Math.max(h.x0, B.guard); B.hints.push(h); later(gi => { if (h.gi === undefined) h.gi = gi; }); return h; };
     const coinsFlat = (x0, x1, y, step) => { for (let x = x0 + step / 2; x < x1; x += step) B.coins.push({ x, y: y - 32 }); };
     const pit = (x0, x1, y, depth, lava) => {
       B.walls.push(W(x0, y + 8, x0, y + depth), W(x1, y + 8, x1, y + depth));
@@ -381,8 +381,13 @@
       const kick = B.p.pts.filter(p => p[0] >= x);
       B.decor.ramps.push([[x + 20, y], ...kick, [tx, y]]);
       const s = { tx: Math.cos(A), ty: -Math.sin(A) };
-      const lx = tx + o.gap, ly = y + o.drop;
-      const v = idealSpeed(tx, ty, s.tx, s.ty, ly, lx + o.landLen * 0.3, undefined, o.g);
+      let lx = tx + o.gap, ly = y + o.drop;
+      let v = idealSpeed(tx, ty, s.tx, s.ty, ly, lx + o.landLen * 0.3, undefined, o.g);
+      // keep the jump reachable: shrink the gap until the needed run-up speed is realistic
+      const appr = vv => Math.sqrt(vv * vv + 2 * G * o.h + 2 * (ROLL + AIR * vv * vv) * Lk * 1.2) * 1.02;
+      while (B.maxApproach && appr(v) > B.maxApproach && o.gap > 200) {
+        o.gap -= 20; lx = tx + o.gap; v = idealSpeed(tx, ty, s.tx, s.ty, ly, lx + o.landLen * 0.3, undefined, o.g);
+      }
       hint({ x0: x - 1000, x1: x - 5, kick: true, v: Math.sqrt(v * v + 2 * G * o.h + 2 * (ROLL + AIR * v * v) * Lk * 1.2) * 1.02 });
       hint({ x0: x - 5, x1: tx + 1, coast: true });
       const arc = [];
@@ -610,11 +615,14 @@
       B.decor.warns.push({ x: x - 60, y: y - 120 });
       return B.flat(len, 120);
     };
-    const timed = (x0, x1, v) => hint({ x0, x1, timed: true, v: v || 300 });
+    const timed = (x0, x1, v) => hint({ x0, x1, timed: true, v: v || 300, wait: x0 + 80 });
     B.birds = (len, n, speed) => {
       const x = X(), y = Y();
+      speed = speed || 1.6;
       for (let i = 0; i < n; i++) {
-        B.birds_.push({ cx: x + len * (i + 1) / (n + 1), cy: y - 52 - (i % 2) * 14, ax: len / (n + 1) * 0.42, ay: 16, speed: speed || 1.6, phase: i * 1.9 });
+        const cx = x + len * (i + 1) / (n + 1);
+        // figure-eight flight that dips down to head height; phases form a "green wave" at ~320 px/s
+        B.birds_.push({ cx, cy: y - 115, ax: Math.min(110, len / (n + 1) * 0.4), ay: 48, speed, phase: -speed * (cx - x) / 320 });
       }
       timed(x - 220, x + len);
       B.decor.warns.push({ x: x - 60, y: y - 130 });
@@ -656,9 +664,9 @@
       const x = X(), y = Y();
       hint({ x0: x - 300, x1: x, v: 250 });
       B.end();
-      const len = 520, run = 330;
-      B.begin(x, y + depth); B.p.kind('soft').line(x + len, y + depth).kind('normal');
-      B.p.cubic(x + len + run * 0.5, y + depth, x + len + run * 0.5, y, x + len + run, y);
+      const len = 520, run = depth * 2.4;
+      B.begin(x, y + depth); B.p.kind('soft').line(x + len, y + depth).kind('conv', 1);
+      B.p.cubic(x + len + run * 0.5, y + depth, x + len + run * 0.5, y, x + len + run, y).kind('normal');
       B.waters.push({ x, y: y + depth - 190, w: len + 40, h: 190, style: 'balls' });
       B.decor.hatch.push([x - 30, y, 30, depth + 20]);
       hint({ x0: x, x1: x + len + run, max: true });
@@ -714,9 +722,9 @@
       B.buttons_.push({ x: x - 230, w: 90, y: fy, target: { type: 'door', i: di }, color: '#ff8a3d' });
       B.doors_.push({ x: x + 500, top: y - 160, bottom: fy, open: 0 });
       B.decor.hatch.push([x + 490, y - 200, 40, 40]);
-      B.decor.arrows.push({ x: x - 185, y: fy - 140, up: false, back: true });
-      B.hints.push({ door: di, btnX: x - 185, x0: x - 400, x1: x + 520 });
-      later(gi => { B.hints[B.hints.length - 1].gi = gi; });
+      B.decor.arrows.push({ x: x - 185, y: fy - 80, up: false, back: true });
+      const dh = { door: di, btnX: x - 185, x0: x - 400, x1: x + 520 };
+      B.hints.push(dh); later(gi => (dh.gi = gi));
       coinsFlat(x - 260, x - 120, fy, 60);
       return B.flat(300, 100);
     };
@@ -725,7 +733,8 @@
       B.pool(len, depth);
       const run = Math.max(210, depth * 2.2);
       for (let i = 0; i < n; i++) {
-        B.piranhas_.push({ x: x + run + (len - 2 * run) * (i + 0.5) / n, surface: y, base: depth * 0.6, h: depth * 0.6 + 130, speed: 2.2, phase: i * 2.3 });
+        const px = x + run * 0.7 + (len - 1.4 * run) * (i + 0.5) / n;
+        B.piranhas_.push({ x: px, surface: y, base: depth * 0.6, h: depth * 0.6 + 130, speed: 2.0, phase: -2.0 * (px - x) / 280 });
       }
       B.hints.pop();
       timed(x - 200, x + len, 300);
@@ -740,9 +749,10 @@
     };
     B.pendulums = (len, n, speed) => {
       const x = X(), y = Y();
-      for (let i = 0; i < n; i++) B.pend_.push({ px: x + len * (i + 1) / (n + 1), py: y - 340, L: 288, amp: 0.85, speed: speed || 1.7, phase: i * 1.6, r: 30 });
-      B.decor.hatch.push([x, y - 370, len, 30]);
-      timed(x - 220, x + len);
+      speed = speed || 1.3;
+      for (let i = 0; i < n; i++) { const px = x + len * (i + 1) / (n + 1); B.pend_.push({ px, py: y - 300, L: 235, amp: 0.9, speed, phase: -speed * (px - x) / 450, r: 30 }); }
+      B.decor.hatch.push([x, y - 330, len, 30]);
+      timed(x - 220, x + len, 450);
       return B.flat(len, 110);
     };
     B.dropSpikes = (len, n) => {
@@ -771,6 +781,8 @@
       B.begin(x + gap + 4, y - rise + 2).flat(300);
       return B;
     };
+    B.mark = () => { B.guard = X(); return B; };
+    B.x = X; B.y = Y; B.bounds = () => { let lo = Infinity, hi = -Infinity; for (const g of B.gr) for (const q of g.pts) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); } if (B.p) for (const q of B.p.pts) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); } return [lo, hi]; };
     B.checkpoint = () => {
       const x = X();
       const cp = { x: x + 70, tx: x + 20, dir: 1 };
@@ -785,14 +797,14 @@
       B.end();
       return B;
     };
-    B.saws_ = []; B.crush = []; B.lowG = []; B.birds_ = []; B.floaters = []; B.cannons_ = []; B.doors_ = []; B.buttons_ = [];
+    B.sections = []; B.saws_ = []; B.crush = []; B.lowG = []; B.birds_ = []; B.floaters = []; B.cannons_ = []; B.doors_ = []; B.buttons_ = [];
     B.piranhas_ = []; B.hail_ = []; B.pend_ = []; B.drops_ = []; B.decor.clouds = []; B.decor.cables = [];
     B.build = () => ({
       name: B.name, start: B.start, grounds: B.gr, walls: B.walls, coins: B.coins, spikes: B.spikes,
       gates: [], buttons: B.buttons.concat(B.buttons_), movers: B.movers, flaps: B.flaps, saws: B.saws_, fans: B.fans,
       portals: B.portals, waters: B.waters, crushers: B.crush, lowG: B.lowG, theme: B.theme, birds: B.birds_, floaters: B.floaters,
       cannons: B.cannons_, doors: B.doors_, piranhas: B.piranhas_, hail: B.hail_, pendulums: B.pend_, dropSpikes: B.drops_, special: B.special, checkpoints: B.checkpoints, finish: B.finish,
-      deathY: B.deathY, deathRects: B.deathRects, decor: B.decor, hints: B.hints,
+      deathY: B.deathY, deathRects: B.deathRects, decor: B.decor, hints: B.hints, sections: B.sections,
     });
     return B;
   }
@@ -950,7 +962,8 @@
 
   // Level 10 — "Finale": a bit of everything
   function level10() {
-    const B = Builder('Level 10 · Finale');
+    const B = Builder('Level 10 · ⭐ Finale');
+    B.special = true;
     B.begin(0, 0).flat(120).startHere('FINALE').flat(250, 80).slope(400, 150).ice(500, 100)
       .kickerGap({ h: 50, gap: 280 }).flat(150)
       .crushers(500, 2).flat(150)
@@ -982,7 +995,112 @@
     return B.build();
   }
 
+
+  // ======================= LEVEL GENERATOR (levels 11–50) =======================
+  function rng(seed) { // mulberry32
+    return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  const INTRO = { 11: 'birds', 12: 'balloon', 13: 'ballpit', 14: 'cannon', 15: 'lava', 16: 'door', 17: 'piranha', 18: 'hail', 19: 'pendulum', 21: 'cable', 22: 'bubble', 23: 'drops' };
+  const GEN_NAMES = {
+    11: 'Vogelflug', 12: 'Luftballon', 13: 'Bällebad', 14: 'Kanonenkugel', 15: 'Lavaland', 16: 'Geheimtür', 17: 'Piranha-Teich', 18: 'Eisregen', 19: 'Pendelhalle',
+    20: '⭐ Extra: Feuerprobe', 21: 'Seilbahn', 22: 'Seifenblasen', 23: 'Stachelregen', 24: 'Mitternacht', 25: 'Vulkan', 26: 'Wolkenkratzer', 27: 'Gletscher',
+    28: 'Zirkus', 29: 'Dschungel', 30: '⭐ Extra: Sturm', 31: 'Fabrikhalle', 32: 'Sternenstaub', 33: 'Wasserwelt', 34: 'Kanonade', 35: 'Lava-Lauf',
+    36: 'Geisterbahn', 37: 'Frosthölle', 38: 'Vogelschwarm', 39: 'Labyrinth', 40: '⭐ Extra: Albtraum', 41: 'Turbo', 42: 'Himmelsleiter', 43: 'Unterwelt',
+    44: 'Eiszeit', 45: 'Feuerwerk', 46: 'Chaos', 47: 'Präzision', 48: 'Höllenritt', 49: 'Der letzte Weg', 50: '⭐ Extra: Endgegner',
+  };
+  const FOCUS = {
+    24: ['saws', 'birds', 'drops'], 25: ['lava', 'cannon'], 26: ['elev', 'fanUp', 'bubble'], 27: ['kick', 'stairs'], 28: ['tramp', 'cannon', 'balloon', 'ballpit'],
+    29: ['birds', 'piranha', 'pendulum'], 31: ['crush', 'rev', 'saws'], 32: ['moon', 'moonTramp'], 33: ['pool', 'piranha', 'ballpit'], 34: ['cannon'],
+    35: ['lava', 'kick'], 36: ['pendulum', 'drops', 'wheel'], 37: ['hail', 'kick'], 38: ['birds'], 39: ['door', 'mover', 'elev'], 41: ['loop', 'wall', 'hump'],
+    42: ['bubble', 'balloon', 'elev', 'cable'], 43: ['lava', 'shaft', 'drops'], 44: ['hail', 'kick', 'stairs'], 45: ['cannon', 'balloon'], 47: ['kick', 'tramp', 'moon'],
+    48: ['lava', 'crush', 'saws'], 49: ['pendulum', 'hail', 'birds', 'drops'],
+  };
+  function genLevel(n, seed) {
+    const rnd = rng(seed), d = Math.min(1.15, (n - 11) / 39 + (n % 10 === 0 ? 0.25 : 0));
+    const special = n % 10 === 0;
+    const B = Builder(`Level ${n} · ${GEN_NAMES[n]}`);
+    B.special = special;
+    B.ceilMargin = Math.max(16, 28 - 12 * d);
+    B.maxApproach = 960;
+    if (n % 6 === 0) B.theme = 'night';
+    const icy = n % 8 === 3 || n === 44 || n === 37;
+    const lavaOn = n >= 15, lavaLevel = n >= 15 && (n % 5 === 0 || rnd() < 0.2);
+    if (lavaLevel) B.lavaPits = true;
+    const pick = a => a[Math.floor(rnd() * a.length)];
+    const R = (a, b) => a + rnd() * (b - a);
+    const I = (a, b) => Math.floor(R(a, b + 1));
+    const lava = () => lavaOn && rnd() < 0.5;
+    const run = len => (icy ? B.ice(len, 100) : B.flat(len, 100));
+    const SECT = {
+      kick: () => { run(icy ? 900 : 650); if (icy) B.maxApproach = 780; B.kickerGap({ h: R(45, 80), gap: R(240, 300) + d * 240, drop: rnd() < 0.4 ? R(0, 120) : 0, lava: lava() }); B.maxApproach = 960; },
+      tramp: () => { run(450); B.trampGap({ gap: 380 + d * 220 + R(0, 60), power: R(900, 1000), lava: lava() }); },
+      saws: () => B.saws(R(500, 800), I(1, 1 + Math.round(2 * d))),
+      crush: () => B.crushers(R(500, 850), I(1, 1 + Math.round(2 * d))),
+      flaps: () => { run(350); B.flapsBridge(I(3, 3 + Math.round(2 * d)), 200); },
+      stairs: () => B.stairs(I(4, 7)),
+      bumps: () => B.ceilBumps(R(600, 1100)),
+      loop: () => { B.conv(400).flat(60).loop(R(125, 150), rnd() < 0.4); },
+      hump: () => B.magnetHump(R(150, 200), 440),
+      wall: () => { B.conv(350).flat(60).magnetWall(R(240, 320)); },
+      pool: () => B.pool(560, 110, rnd() < 0.5),
+      elev: () => B.elevator(R(380, 480)),
+      mover: () => B.moverPit(),
+      shaft: () => B.shaftDown(R(600, 750)),
+      drop: () => B.drop(R(420, 480)),
+      fanUp: () => B.fanUp(R(350, 430)),
+      moon: () => { B.flat(200).conv(300); run(400); B.kickerGap({ h: R(55, 80), gap: 700 + d * 400, g: R(0.3, 0.4), landLen: 450, lava: lava() }); },
+      moonTramp: () => { run(450); B.trampGap({ gap: 850 + d * 300, power: R(650, 750), g: R(0.3, 0.38), landLen: 450, lava: lava() }); },
+      wheel: () => B.spikeWheel(R(550, 700)),
+      rev: () => B.reverseConv(R(300, 500)),
+      birds: () => B.birds(R(700, 1200), I(2, 2 + Math.round(2 * d)), 1.5 + d * 0.8),
+      balloon: () => B.balloonGap(800 + d * 450 + R(0, 100), lava()),
+      ballpit: () => B.ballPit(R(380, 480)),
+      cannon: () => B.cannon(900 + d * 500 + R(0, 150), lava()),
+      lava: () => B.lavaHops(I(3, 3 + Math.round(3 * d))),
+      door: () => B.doorRoom(),
+      piranha: () => B.piranhaPool(R(700, 1000), I(2, 2 + Math.round(2 * d))),
+      hail: () => B.hailZone(R(700, 1100), I(3, 3 + Math.round(3 * d)), 1.2 - d * 0.25),
+      pendulum: () => B.pendulums(R(1000, 1600), I(2, 2 + Math.round(2 * d)), 1.3 + d * 0.4),
+      cable: () => B.cableCar(900 + d * 400, R(100, 250), lava()),
+      bubble: () => B.bubbleLift(R(250, 310)),
+      drops: () => B.dropSpikes(R(700, 1100), I(2, 2 + Math.round(3 * d))),
+    };
+    const base = ['kick', 'tramp', 'saws', 'crush', 'flaps', 'stairs', 'bumps', 'loop', 'hump', 'wall', 'pool', 'elev', 'mover', 'shaft', 'drop', 'fanUp', 'moon', 'moonTramp', 'wheel', 'rev'];
+    const unlocked = Object.keys(INTRO).filter(k => Number(k) <= n).map(k => INTRO[k]);
+    const intro = INTRO[n];
+    const focusList = FOCUS[n] || (intro ? [intro] : null);
+    const focusPick = () => focusList ? pick(focusList) : null;
+    const focus = focusPick();
+    const pool = base.concat(unlocked);
+    const count = 7 + Math.round(7 * Math.min(1, d)) + (special ? 3 : 0);
+    const cpEvery = d < 0.5 ? 3 : 4;
+    B.begin(0, 0).flat(120).startHere(special ? 'EXTRA' : 'START').flat(250, 80);
+    let lastKey = null, row = 0;
+    const colors = ['#2e7d32', '#e91e63', '#7b1fa2', '#00bcd4', '#ff9800', '#3f51b5'];
+    for (let i = 0; i < count; i++) {
+      if (i > 0 && i % cpEvery === 0) { B.flat(250).checkpoint(); }
+      let key = i === 0 && focus ? focus : (focusList && rnd() < 0.35 ? focusPick() : pick(pool));
+      if (key === lastKey) key = pick(pool);
+      lastKey = key;
+      B.mark(); run(R(380, 480));
+      const sec = { key, g0: B.gr.length, x0: B.x() };
+      SECT[key]();
+      B.flat(150);
+      sec.g1 = B.gr.length; sec.x1 = B.x(); B.sections.push(sec);
+      if (B.x() > 7000 && i < count - 1) { // new row through a portal
+        const [, hi] = B.bounds();
+        B.flat(200).portalTo(0, hi + 1100, colors[row++ % colors.length]).flat(200);
+      }
+    }
+    B.mark(); run(450);
+    B.finishLine(700);
+    if (special) B.coins.forEach((c, i) => { if (i % 6 === 3) c.v = 5; });
+    return B.build();
+  }
+  // seeds picked by the offline validator (every level is solvable by the test bot)
+  const SEEDS = { 11: 11000, 12: 12000, 13: 13000, 14: 14000, 15: 15000, 16: 16000, 17: 17000, 18: 18001, 19: 19000, 20: 20000, 21: 21000, 22: 22000, 23: 23000, 24: 24000, 25: 25000, 26: 26005, 27: 27007, 28: 28000, 29: 29000, 30: 30000, 31: 31000, 32: 32001, 33: 33000, 34: 34000, 35: 35007, 36: 36000, 37: 37004, 38: 38000, 39: 39002, 40: 40000, 41: 41000, 42: 42000, 43: 43000, 44: 44010, 45: 45000, 46: 46001, 47: 47000, 48: 48000, 49: 49001, 50: 50000 };
   const LEVELS = [level1, level2, level3, level4, level5, level6, level7, level8, level9, level10];
+  for (let n = 11; n <= 50; n++) LEVELS.push(() => genLevel(n, SEEDS[n] !== undefined ? SEEDS[n] : n * 1000));
 
   // ---------- geometry ----------
   function segIntersect(px, py, qx, qy, s) {
@@ -1428,7 +1546,7 @@
     return { S, step, reset, bikePoints, coins, L, sawPos, crusherRect, timedShapes, birdPos, pendulumPos, piranhaPos, hailPos, placeOnGround, consts: { HEAD, WHEEL_R, WHEEL_X } };
   }
 
-  const api = { createGame, levelCount: LEVELS.length, Builder };
+  const api = { createGame, levelCount: LEVELS.length, Builder, genLevel, SEEDS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MotoTrial = api;
 })(this);
