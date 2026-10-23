@@ -1,6 +1,6 @@
 // Moto Trial service worker: works offline, updates in the background.
 // Bump VERSION whenever you deploy so old caches get cleaned up.
-const VERSION = 'moto-v1';
+const VERSION = 'moto-v2';
 const ASSETS = ['./', 'index.html', 'game.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 

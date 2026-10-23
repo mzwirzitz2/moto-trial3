@@ -20,16 +20,20 @@
   #speed { width: 180px; }
   #speedbar { height: 10px; border: 2px solid #444; border-radius: 6px; margin-top: 4px; overflow: hidden; background: #eee; }
   #speedfill { height: 100%; width: 0; background: linear-gradient(90deg, #4caf50, #ffc107 60%, #e53935); }
-  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-  #panel { background: rgba(255,255,255,.95); border: 3px solid #333; border-radius: 16px; padding: 24px 32px; max-width: 560px; text-align: center; box-shadow: 4px 6px 0 #3334; color: #222; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; box-sizing: border-box;
+    padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 8px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px); }
+  #panel { --px: 32px; --py: 24px; box-sizing: border-box; background: rgba(255,255,255,.97); border: 3px solid #333; border-radius: 16px; padding: var(--py) var(--px); max-width: 560px; text-align: center; box-shadow: 4px 6px 0 #3334; color: #222; }
   #panel h1 { margin: 0 0 8px; font-size: 40px; color: #1f5fbf; }
   #panel h2 { margin: 0 0 8px; font-size: 30px; }
   #panel p { margin: 8px 0; font-size: 18px; line-height: 1.4; }
   kbd { display: inline-block; border: 2px solid #444; border-bottom-width: 4px; border-radius: 6px; padding: 0 6px; font-family: inherit; background: #fff; min-width: 18px; }
   #help { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; color: #555; font-size: 15px; pointer-events: none; }
   .hidden { display: none !important; }
-  #panel { max-height: 92vh; overflow-y: auto; -webkit-overflow-scrolling: touch; pointer-events: none; }
+  #panel { max-height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; pointer-events: none; }
   #panel.interactive { pointer-events: auto; }
+  #panel .foot { position: sticky; bottom: calc(-1 * var(--py)); margin: 8px calc(-1 * var(--px)) calc(-1 * var(--py)); padding: 10px var(--px) calc(var(--py) - 2px);
+    background: #fff; border-top: 2px dashed #ccc; border-radius: 0 0 13px 13px; z-index: 2; box-shadow: 0 -8px 12px -6px #0002; }
+  #panel .foot p { margin: 4px 0; }
   #panel.crashed button { pointer-events: auto; }
   #panel h1 { margin-bottom: 4px; }
   .mtabs { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
@@ -77,11 +81,14 @@
   body.touch #help { display: none; }
   body:not(.touch) .only-touch, body.touch .only-keys { display: none; }
   @media (max-width: 640px), (max-height: 500px) {
-    #hud { top: 8px; left: 8px; right: 8px; font-size: 13px; white-space: nowrap; gap: 6px; }
+    #hud { top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left)); right: calc(8px + env(safe-area-inset-right)); font-size: 13px; white-space: nowrap; gap: 6px; }
     #hud .box { padding: 4px 8px; }
     #hud button { font-size: 15px; padding: 3px 8px; }
     #speed { width: 92px; }
-    #panel { margin: 0 12px; padding: 16px 18px; }
+    #panel { --px: 14px; --py: 12px; margin: 0; width: 100%; }
+    #panel .legend { font-size: 13px; gap: 1px 8px; grid-template-columns: 1fr 1fr; }
+    #panel button.lv { padding: 2px 0 0; font-size: 14px; }
+    .lname { font-size: 20px; }
     #panel h1 { font-size: 30px; } #panel h2 { font-size: 22px; } #panel p { font-size: 15px; }
     .pad { width: 92px; height: 92px; font-size: 12px; } .pad span { font-size: 26px; }
   }
@@ -176,7 +183,6 @@
     if (S.status === 'ready') start();
     else if (S.status === 'crash') { if (performance.now() - crashAt > 450) respawn(); }
     else if (S.status === 'finish') nextLevel();
-    else if (S.status === 'ready' && menuTab !== 'levels') { menuTab = 'levels'; updatePanel(); }
   }
   addEventListener('keydown', e => {
     initAudio();
@@ -304,7 +310,8 @@
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (S && S.status === 'ready') updatePanel(); });
   addEventListener('appinstalled', () => { installPrompt = null; if (S && S.status === 'ready') updatePanel(); });
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  // offline support; skipped on localhost so development always shows fresh files
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   function installHtml() {
     if (standalone()) return '';
     if (installPrompt) return '<p><button class="mt" id="installBtn">📲 Als App installieren</button></p>';
@@ -332,9 +339,14 @@
       <h2 class="lname">${L.name}</h2>
       ${b ? `<p class="best">🏆 Bestes Ergebnis: 🪙 ${b.score}/${total()} · ⏱ ${fmt(b.time)}</p>` : '<p class="best">Noch nicht geschafft</p>'}
       ${intro}<div class="legend">${legendFor(L)}</div>
-      <p class="only-keys"><kbd>→</kbd> Gas &nbsp; <kbd>←</kbd> Bremse / rückwärts &nbsp; (oder <kbd>↑</kbd> / <kbd>↓</kbd>)</p>
-      <p class="only-touch">Rechts halten = <b>Gas</b> · Links halten = <b>Bremse</b>, im Stand <b>rückwärts</b></p>
-      <p><button class="big" id="startBtn">▶ Start <span class="only-keys">(Enter)</span></button></p>${installHtml()}`;
+      ${installHtml()}`;
+  }
+  function footHtml() {
+    return `<div class="foot">
+        <p class="only-keys"><kbd>→</kbd> Gas &nbsp; <kbd>←</kbd> Bremse / rückwärts &nbsp; (oder <kbd>↑</kbd> / <kbd>↓</kbd>)</p>
+        <p class="only-touch">Rechts halten = <b>Gas</b> · Links halten = <b>Bremse</b>, im Stand <b>rückwärts</b></p>
+        <p><button class="big" id="startBtn">▶ Level ${levelIndex + 1} starten <span class="only-keys">(Enter)</span></button></p>
+      </div>`;
   }
   function scoresHtml() {
     const list = results[scoreLevel] || [];
@@ -402,7 +414,7 @@
     p.classList.toggle('interactive', S.status !== 'crash');
     p.classList.toggle('crashed', S.status === 'crash');
     if (S.status === 'ready') {
-      p.innerHTML = `<h1>🏍️ Moto Trial</h1>${tabsHtml()}` + (menuTab === 'levels' ? levelsHtml() : menuTab === 'scores' ? scoresHtml() : garageHtml());
+      p.innerHTML = `<h1>🏍️ Moto Trial</h1>${tabsHtml()}` + (menuTab === 'levels' ? levelsHtml() : menuTab === 'scores' ? scoresHtml() : garageHtml()) + footHtml();
       bindMenu(p);
     } else if (S.status === 'crash') {
       p.innerHTML = `<h2>💥 ${S.msg}</h2>
@@ -418,8 +430,10 @@
         <p>⏱ ${r.time.toFixed(2)} s &nbsp; · &nbsp; 💥 ${r.deaths} Crashs</p>
         <p>${rank === 0 ? '🏆 Neuer Rekord!' : rank > 0 ? `Platz ${rank + 1} in der Bestenliste` : `Rekord: 🪙 ${bestOf(levelIndex).score} in ${fmt(bestOf(levelIndex).time)}`}</p>
         <p class="earned">+${lastEarned} 🪙 für die Garage (jetzt ${profile.wallet})</p>
-        <p>${hasNext ? `<button class="big" id="nextLevel">▶ Level ${levelIndex + 2} <span class="only-keys">(Enter)</span></button>` : '<b>🎉 Du hast alle Level geschafft!</b>'}</p>
-        <p><button class="mt" id="replay">↺ Nochmal</button> <button class="mt" id="toMenu">☰ Menü</button></p>`;
+        <div class="foot">
+          <p>${hasNext ? `<button class="big" id="nextLevel">▶ Level ${levelIndex + 2} <span class="only-keys">(Enter)</span></button>` : '<b>🎉 Du hast alle Level geschafft!</b>'}</p>
+          <p><button class="mt" id="replay">↺ Nochmal</button> <button class="mt" id="toMenu">☰ Menü</button></p>
+        </div>`;
       bindMenu(p);
     }
   }
