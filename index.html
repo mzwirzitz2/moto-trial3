@@ -34,6 +34,8 @@
   #panel .foot { position: sticky; bottom: calc(-1 * var(--py)); margin: 8px calc(-1 * var(--px)) calc(-1 * var(--py)); padding: 10px var(--px) calc(var(--py) - 2px);
     background: #fff; border-top: 2px dashed #ccc; border-radius: 0 0 13px 13px; z-index: 2; box-shadow: 0 -8px 12px -6px #0002; }
   #panel .foot p { margin: 4px 0; }
+  #panel p.ver { margin: -4px 0 6px; font-size: 12px; color: #888; }
+  #panel p.ver.new { color: #fff; background: #e65100; border-radius: 8px; padding: 4px 8px; font-size: 13px; font-weight: bold; }
   #panel.crashed button { pointer-events: auto; }
   #panel h1 { margin-bottom: 4px; }
   .mtabs { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
@@ -48,6 +50,7 @@
   #panel button.lv.done { background: #e8f5e9; border-color: #43a047; }
   #panel button.lv.sp { border-color: #ff9800; }
   #panel button.lv.on { background: #1f5fbf; color: #fff; }
+  #panel button.lv.locked { background: #eee; color: #aaa; border-color: #bbb; box-shadow: none; cursor: default; }
   .lname { margin: 6px 0 2px; } .best { margin: 2px 0 6px !important; color: #555; }
   table.scores { width: 100%; border-collapse: collapse; font-size: 15px; margin: 6px 0; }
   table.scores td, table.scores th { border-bottom: 1px solid #ccc; padding: 3px 4px; }
@@ -113,6 +116,7 @@
 <div class="pad" id="padGas"><span>▶</span>GAS</div>
 <div id="overlay"><div id="panel"></div></div>
 <div id="help"><kbd>→</kbd>/<kbd>↑</kbd> Gas · <kbd>←</kbd>/<kbd>↓</kbd> Bremse · oder Maus: rechte Hälfte Gas, linke Bremse · <kbd>Enter</kbd> weiter · <kbd>R</kbd> neu · <kbd>M</kbd> Ton</div>
+<script src="version.js"></script>
 <script src="game.js"></script>
 <script>
 (() => {
@@ -194,7 +198,7 @@
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); proceed(); }
     if (e.key === 'r' || e.key === 'R') restart();
     if (e.key === 'Escape') toMenu();
-    if (/^[0-9]$/.test(e.key) && S.status !== 'run') { const n = e.key === '0' ? 10 : Number(e.key); if (n <= MotoTrial.levelCount) loadLevel(n - 1); }
+    if (/^[0-9]$/.test(e.key) && S.status !== 'run') { const n = e.key === '0' ? 10 : Number(e.key); if (n <= MotoTrial.levelCount && isUnlocked(n - 1)) loadLevel(n - 1); }
     if (e.key === 'm' || e.key === 'M') toggleMute();
   });
   addEventListener('keyup', e => { if (map[e.key]) { held.delete(e.key); syncKeys(); e.preventDefault(); } });
@@ -219,7 +223,7 @@
   function toMenu() { menuTab = 'levels'; crashBike = null; game.reset(true); pointers.clear(); held.clear(); syncKeys(); updatePanel(); }
   $('mute').addEventListener('click', e => { e.stopPropagation(); initAudio(); toggleMute(); });
 
-  function start() { if (S.status === 'ready') { S.status = 'run'; finishedRecord = null; } crashBike = null; updatePanel(); }
+  function start() { if (S.status === 'ready' && !isUnlocked(levelIndex)) return; if (S.status === 'ready') { S.status = 'run'; finishedRecord = null; } crashBike = null; updatePanel(); }
   function respawn() { game.reset(false); crashBike = null; updatePanel(); }
 
   // ---------- profile: wallet, garage, results (all local) ----------
@@ -258,6 +262,10 @@
     }
     return r;
   })();
+  // a level opens once the one before it has been finished
+  const isUnlocked = i => i === 0 || !!(results[i - 1] && results[i - 1].length);
+  const highestUnlocked = () => { let i = 0; while (i + 1 < MotoTrial.levelCount && isUnlocked(i + 1)) i++; return i; };
+  if (!isUnlocked(levelIndex)) loadLevel(highestUnlocked());
   const saveProfile = () => store.set('mototrial-profile', profile);
   const saveResults = () => store.set('mototrial-results', results);
   function currentLook() {
@@ -315,7 +323,24 @@
   addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (S && S.status === 'ready') updatePanel(); });
   addEventListener('appinstalled', () => { installPrompt = null; if (S && S.status === 'ready') updatePanel(); });
   // offline support; skipped on localhost so development always shows fresh files
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  // the version is part of the worker URL, so every new version installs a fresh worker
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js?v=' + self.APP_VERSION, { updateViaCache: 'none' }).catch(() => {});
+  // is a newer version online than the one running?
+  let latestVersion = null, versionChecked = false;
+  if (location.protocol.startsWith('http')) {
+    fetch('version.js?check=' + Date.now(), { cache: 'no-store' }).then(r => r.text()).then(t => {
+      const m = t.match(/APP_VERSION = '([^']+)'/);
+      if (!m) return;
+      if (m[1] !== self.APP_VERSION) latestVersion = m[1]; else versionChecked = true;
+      if (S && S.status === 'ready') updatePanel();
+    }).catch(() => {});
+  }
+  function versionHtml() {
+    const cur = `Version ${self.APP_VERSION} · ${self.APP_DATE}`;
+    return latestVersion
+      ? `<p class="ver new">⬆️ Version ${latestVersion} ist online – App ganz schließen und neu öffnen (${cur})</p>`
+      : `<p class="ver">${cur}${versionChecked ? ' · ✓ aktuell' : ''}</p>`;
+  }
   function installHtml() {
     if (standalone()) return '';
     if (installPrompt) return '<p><button class="mt" id="installBtn">📲 Als App installieren</button></p>';
@@ -335,6 +360,7 @@
   function levelsHtml() {
     const cells = Array.from({ length: MotoTrial.levelCount }, (_, i) => {
       const b = bestOf(i), sp = (i + 1) % 10 === 0;
+      if (!isUnlocked(i)) return `<button class="lv locked${sp ? ' sp' : ''}" disabled title="Erst Level ${i} schaffen">${i + 1}<small>🔒</small></button>`;
       return `<button class="lv${i === levelIndex ? ' on' : ''}${b ? ' done' : ''}${sp ? ' sp' : ''}" data-level="${i}" title="Level ${i + 1}">${i + 1}<small>${b ? '🪙' + b.score : sp ? '⭐' : '&nbsp;'}</small></button>`;
     }).join('');
     const b = bestOf(levelIndex);
@@ -378,7 +404,7 @@
   }
   function bindMenu(p) {
     p.querySelectorAll('.mt[data-tab]').forEach(b => b.onclick = e => { e.stopPropagation(); menuTab = b.dataset.tab; scoreLevel = levelIndex; updatePanel(); });
-    p.querySelectorAll('.lv').forEach(b => b.onclick = e => { e.stopPropagation(); initAudio(); loadLevel(Number(b.dataset.level)); });
+    p.querySelectorAll('.lv:not(.locked)').forEach(b => b.onclick = e => { e.stopPropagation(); initAudio(); loadLevel(Number(b.dataset.level)); });
     const ib = $('installBtn'); if (ib) ib.onclick = async e => { e.stopPropagation(); if (!installPrompt) return; installPrompt.prompt(); try { await installPrompt.userChoice; } catch (err) {} installPrompt = null; updatePanel(); };
     const sb = $('startBtn'); if (sb) sb.onclick = e => { e.stopPropagation(); initAudio(); start(); };
     const pl = $('prevL'), nl = $('nextL');
@@ -418,7 +444,7 @@
     p.classList.toggle('interactive', S.status !== 'crash');
     p.classList.toggle('crashed', S.status === 'crash');
     if (S.status === 'ready') {
-      p.innerHTML = `<h1>🏍️ Moto Trial</h1>${tabsHtml()}` + (menuTab === 'levels' ? levelsHtml() : menuTab === 'scores' ? scoresHtml() : garageHtml()) + footHtml();
+      p.innerHTML = `<h1>🏍️ Moto Trial</h1>${versionHtml()}${tabsHtml()}` + (menuTab === 'levels' ? levelsHtml() : menuTab === 'scores' ? scoresHtml() : garageHtml()) + footHtml();
       bindMenu(p);
     } else if (S.status === 'crash') {
       p.innerHTML = `<h2>💥 ${S.msg}</h2>
