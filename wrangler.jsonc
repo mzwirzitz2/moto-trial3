@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "moto-trial3",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  "observability": { "enabled": true },
+  // the game itself: static files from the repo root (exclusions in .assetsignore)
+  "assets": { "directory": ".", "binding": "ASSETS" },
+  // shared leaderboard storage
+  "kv_namespaces": [
+    { "binding": "KV", "id": "f8088560d28a4da79596f62c43458984" }
+  ]
+}

@@ -54,6 +54,9 @@
   .lname { margin: 6px 0 2px; } .best { margin: 2px 0 6px !important; color: #555; }
   table.scores { width: 100%; border-collapse: collapse; font-size: 15px; margin: 6px 0; }
   table.scores td, table.scores th { border-bottom: 1px solid #ccc; padding: 3px 4px; }
+  table.scores tr.me td { background: #fff3c4; font-weight: bold; }
+  .world { font-size: 17px; }
+  #panel .hint { font-size: 13px; color: #777; margin: 4px 0; }
   #pname { font: inherit; padding: 3px 8px; border: 2px solid #333; border-radius: 8px; width: 140px; }
   .shop { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
   #panel button.item { padding: 4px 8px; font-size: 14px; display: flex; flex-direction: column; align-items: center; min-width: 74px; }
@@ -266,7 +269,44 @@
   const isUnlocked = i => i === 0 || !!(results[i - 1] && results[i - 1].length);
   const highestUnlocked = () => { let i = 0; while (i + 1 < MotoTrial.levelCount && isUnlocked(i + 1)) i++; return i; };
   if (!isUnlocked(levelIndex)) loadLevel(highestUnlocked());
+  if (!profile.id) profile.id = (self.crypto && crypto.randomUUID ? crypto.randomUUID() : 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
   const saveProfile = () => store.set('mototrial-profile', profile);
+  saveProfile();
+
+  // ---------- shared online leaderboard (Cloudflare Pages Function + KV on /api/scores) ----------
+  const API = 'api/scores';
+  const world = {}; // level → { state: 'loading' | 'ok' | 'off', data }
+  const esc = t => String(t == null ? '' : t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+  function worldLoad(level, force) {
+    if (world[level] && world[level].state !== 'off' && !force) return;
+    world[level] = { state: 'loading' };
+    fetch(`${API}?level=${level}&me=${encodeURIComponent(profile.id)}`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => { world[level] = { state: 'ok', data: d }; })
+      .catch(() => { world[level] = { state: 'off' }; })
+      .then(() => { if (S.status === 'ready' && menuTab === 'scores' && scoreLevel === level) updatePanel(); });
+  }
+  function worldSubmit(level, r, tot) {
+    const fr = finishedRecord;
+    fr.world = { state: 'loading' };
+    fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ level, id: profile.id, name: profile.name, score: r.score, total: tot, time: r.time, deaths: r.deaths }) })
+      .then(res => res.ok ? res.json() : Promise.reject(res.status))
+      .then(d => { fr.world = { state: 'ok', rank: d.rank, players: d.players }; delete world[level]; })
+      .catch(() => { fr.world = { state: 'off' }; })
+      .then(() => { if (S.status === 'finish' && finishedRecord === fr) updatePanel(); });
+  }
+  function worldHtml(level) {
+    const w = world[level];
+    if (!w || w.state === 'loading') return '<p class="hint">🌍 Lade Weltrangliste …</p>';
+    if (w.state === 'off') return '<p class="hint">🌍 Weltrangliste gerade nicht erreichbar (offline?)</p>';
+    const d = w.data;
+    if (!d.scores.length) return '<p class="hint">🌍 Noch niemand hat dieses Level geschafft – sei der Erste!</p>';
+    const row = (e, rank) => `<tr class="${e.me ? 'me' : ''}"><td>${rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : rank + '.'}</td><td>${esc(e.name)}</td><td>🪙 ${e.score}</td><td>${fmt(e.time)}</td><td>💥 ${e.deaths}</td></tr>`;
+    return `<table class="scores"><tr><th></th><th>Name</th><th>Münzen</th><th>Zeit</th><th>Crashs</th></tr>
+      ${d.scores.map((e, k) => row(e, k + 1)).join('')}${d.mine ? `<tr><td colspan="5">…</td></tr>${row({ ...d.mine, me: true }, d.mine.rank)}` : ''}</table>
+      <p class="hint">${d.players} Spieler in diesem Level</p>`;
+  }
   const saveResults = () => store.set('mototrial-results', results);
   function currentLook() {
     const f = cat => SHOP[cat].find(i => i.id === profile.sel[cat]) || SHOP[cat][0];
@@ -380,12 +420,15 @@
   }
   function scoresHtml() {
     const list = results[scoreLevel] || [];
-    const rows = list.map((r, k) => `<tr><td>${['🥇', '🥈', '🥉', '4.', '5.'][k]}</td><td>${(r.name || '').replace(/[<>&]/g, '')}</td><td>🪙 ${r.score}</td><td>${fmt(r.time)}</td><td>💥 ${r.deaths}</td><td>${r.date || ''}</td></tr>`).join('');
+    worldLoad(scoreLevel);
+    const rows = list.map((r, k) => `<tr><td>${['🥇', '🥈', '🥉', '4.', '5.'][k]}</td><td>${esc(r.name)}</td><td>🪙 ${r.score}</td><td>${fmt(r.time)}</td><td>💥 ${r.deaths}</td><td>${r.date || ''}</td></tr>`).join('');
     const done = Object.keys(results).length, sum = Object.values(results).reduce((a, l) => a + (l[0] ? l[0].score : 0), 0);
     return `<p>Geschafft: <b>${done}/${MotoTrial.levelCount}</b> Level · Beste Münzen gesamt: <b>🪙 ${sum}</b></p>
       <p class="lsel"><button class="mt" id="prevL">◀</button> <b>Level ${scoreLevel + 1}</b> <button class="mt" id="nextL">▶</button></p>
-      ${rows ? `<table class="scores"><tr><th></th><th>Name</th><th>Münzen</th><th>Zeit</th><th>Crashs</th><th>Datum</th></tr>${rows}</table>` : '<p>Noch keine Ergebnisse.</p>'}
-      <p>Dein Name: <input id="pname" maxlength="16" value="${profile.name.replace(/"/g, '')}"></p>`;
+      <p>Dein Name: <input id="pname" maxlength="16" value="${esc(profile.name)}"></p>
+      <h3>🌍 Weltweit</h3>${worldHtml(scoreLevel)}
+      <h3>📱 Auf diesem Gerät</h3>
+      ${rows ? `<table class="scores"><tr><th></th><th>Name</th><th>Münzen</th><th>Zeit</th><th>Crashs</th><th>Datum</th></tr>${rows}</table>` : '<p class="hint">Noch keine Ergebnisse.</p>'}`;
   }
   function garageHtml() {
     const cats = Object.keys(SHOP).map(cat => `<h3>${CAT_NAMES[cat]}</h3><div class="shop">${SHOP[cat].map(it => {
@@ -403,13 +446,13 @@
     ctx = real;
   }
   function bindMenu(p) {
-    p.querySelectorAll('.mt[data-tab]').forEach(b => b.onclick = e => { e.stopPropagation(); menuTab = b.dataset.tab; scoreLevel = levelIndex; updatePanel(); });
+    p.querySelectorAll('.mt[data-tab]').forEach(b => b.onclick = e => { e.stopPropagation(); menuTab = b.dataset.tab; scoreLevel = levelIndex; if (menuTab === 'scores') worldLoad(scoreLevel, true); updatePanel(); });
     p.querySelectorAll('.lv:not(.locked)').forEach(b => b.onclick = e => { e.stopPropagation(); initAudio(); loadLevel(Number(b.dataset.level)); });
     const ib = $('installBtn'); if (ib) ib.onclick = async e => { e.stopPropagation(); if (!installPrompt) return; installPrompt.prompt(); try { await installPrompt.userChoice; } catch (err) {} installPrompt = null; updatePanel(); };
     const sb = $('startBtn'); if (sb) sb.onclick = e => { e.stopPropagation(); initAudio(); start(); };
     const pl = $('prevL'), nl = $('nextL');
-    if (pl) pl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + MotoTrial.levelCount - 1) % MotoTrial.levelCount; updatePanel(); };
-    if (nl) nl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + 1) % MotoTrial.levelCount; updatePanel(); };
+    if (pl) pl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + MotoTrial.levelCount - 1) % MotoTrial.levelCount; worldLoad(scoreLevel, true); updatePanel(); };
+    if (nl) nl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + 1) % MotoTrial.levelCount; worldLoad(scoreLevel, true); updatePanel(); };
     const pn = $('pname'); if (pn) { pn.onkeydown = e => e.stopPropagation(); pn.oninput = () => { profile.name = pn.value || 'Spieler'; saveProfile(); }; }
     p.querySelectorAll('.item').forEach(b => b.onclick = e => {
       e.stopPropagation();
@@ -436,6 +479,7 @@
     results[levelIndex] = list.slice(0, 5); saveResults();
     lastEarned = r.score; profile.wallet += r.score; saveProfile();
     finishedRecord = { rank: results[levelIndex].indexOf(r), r };
+    worldSubmit(levelIndex, r, total());
   }
   function updatePanel() {
     const ov = $('overlay'), p = $('panel');
@@ -459,6 +503,9 @@
         <p style="font-size:24px">🪙 ${r.score} / ${tot} ${r.score === tot ? '– <b>alle!</b> 🌟' : ''}</p>
         <p>⏱ ${r.time.toFixed(2)} s &nbsp; · &nbsp; 💥 ${r.deaths} Crashs</p>
         <p>${rank === 0 ? '🏆 Neuer Rekord!' : rank > 0 ? `Platz ${rank + 1} in der Bestenliste` : `Rekord: 🪙 ${bestOf(levelIndex).score} in ${fmt(bestOf(levelIndex).time)}`}</p>
+        <p class="world">${!finishedRecord.world || finishedRecord.world.state === 'loading' ? '🌍 Speichere in der Weltrangliste …'
+          : finishedRecord.world.state === 'off' ? '🌍 Weltrangliste nicht erreichbar – nur lokal gespeichert'
+          : `🌍 Weltweit: <b>Platz ${finishedRecord.world.rank}</b> von ${finishedRecord.world.players}`}${profile.name === 'Spieler' ? '<br><small>Tipp: Trag in der Bestenliste deinen Namen ein.</small>' : ''}</p>
         <p class="earned">+${lastEarned} 🪙 für die Garage (jetzt ${profile.wallet})</p>
         <div class="foot">
           <p>${hasNext ? `<button class="big" id="nextLevel">▶ Level ${levelIndex + 2} <span class="only-keys">(Enter)</span></button>` : '<b>🎉 Du hast alle Level geschafft!</b>'}</p>

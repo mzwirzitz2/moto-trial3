@@ -1,0 +1,11 @@
+.git
+.gitignore
+.assetsignore
+.claude
+.DS_Store
+.wrangler
+node_modules
+worker
+wrangler.jsonc
+README.md
+icons/icon.svg
