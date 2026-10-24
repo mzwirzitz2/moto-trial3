@@ -14,6 +14,7 @@
   const CONV_ACC = 1500, CONV_MAX = 1250;
   const REV_ACC = 650, REV_MAX = 320;   // reverse gear
   const HEAD = 62, WHEEL_R = 14, WHEEL_X = 26;
+  const SLING = { mid: 0.8, amp: 0.5, aimSpeed: 1.4, pmin: 500, pmax: 1500, powerTime: 1.2 };
   const PI = Math.PI;
 
   // ---------- path helpers ----------
@@ -781,6 +782,174 @@
       B.begin(x + gap + 4, y - rise + 2).flat(300);
       return B;
     };
+    // ---- extreme sections (levels 51–60) ----
+    B.balanceLift = (h, amp) => { // elevator whose floor is a belt pushing back and forth: keep your balance
+      h = h || 450; amp = amp || 650;
+      const x = X(), y = Y();
+      B.end();
+      const pw = 300;
+      B.gr.push(makeGround(Path(x - 8, y + 1).kind('conv', 1).line(x + 4 + pw, y + 1).pts, 1, { convWave: { amp, speed: 1.7, phase: 0 } }));
+      const gi = B.gr.length - 1, mi = B.movers.length;
+      B.movers.push({ gi, from: [0, 0], to: [0, -h], speed: 110, mode: 'loop', dwell: 1.6 });
+      B.hints.push({ gi, x0: x - 20, x1: x + pw + 10, mover: mi, ride: true, balance: x + 4 + pw / 2 });
+      B.hints.push({ gi: B.gr.length - 2, x0: x - 300, x1: x + 5, mover: mi, board: x });
+      B.walls.push(W(x + pw + 8, y - h + 8, x + pw + 8, y + 200));
+      B.decor.hatch.push([x + pw + 8, y - h, 30, h + 220], [x - 25, y, 25, 220], [x, y + 200, pw + 30, 20]);
+      B.spikes.push({ x: x + 10, y: y + 160, w: pw - 10, h: 40, dir: 'up' });
+      B.decor.warns.push({ x: x - 80, y: y - 90 });
+      B.begin(x + pw + 8, y - h + 2).flat(300);
+      return B;
+    };
+    B.seesaw = () => { // tipping plank over a pit, spikes above its raised end: slow down to let it tip
+      const x = X(), y = Y(), half = 350, a = 0.32;
+      hint({ x0: x - 300, x1: x, v: 220 });
+      B.end();
+      const px = x + half * Math.cos(a), py = y - half * Math.sin(a) + 1;
+      B.gr.push(makeGround(Path(px - half, py).line(px + half, py).pts, 1, { color: '#8d6e63', pivot: [px, py] }));
+      const gi = B.gr.length - 1;
+      B.seesaws_.push({ gi, maxA: a, rot: -a, omega: 0 });
+      B.hints.push({ gi, x0: px - half - 20, x1: px + half + 20, seesaw: B.seesaws_.length - 1, pivot: px });
+      const rx = x + 2 * half * Math.cos(a);
+      pit(x, rx + 2, y, 240);
+      B.spikes.push({ x: px + 110, y: py - half * Math.sin(a) * 0.9 - 62 - 55, w: 260, h: 40, dir: 'down' });
+      B.decor.hatch.push([px + 110, py - half * Math.sin(a) * 0.9 - 62 - 85, 260, 30]);
+      B.decor.pivots.push([px, py]);
+      B.begin(rx + 2, y + 2).flat(300);
+      return B;
+    };
+    B.forkTrap = () => { // two ways: the right one needs the right speed, the easy-looking one ends in a trap
+      const x = X(), y = Y(), A = 40 * PI / 180, Lk = 130, hK = 60, gap = 380, land = 420;
+      const tx = x + Lk, ty = y - hK;
+      B.p.cubic(x + Lk * 0.4, y, tx - 40 * Math.cos(A), ty + 40 * Math.sin(A), tx, ty);
+      B.decor.ramps.push([[x + 20, y], ...B.p.pts.filter(q => q[0] >= x), [tx, y]]);
+      const lx = tx + gap, ly = y - 40;
+      const v = idealSpeed(tx, ty, Math.cos(A), -Math.sin(A), ly, lx + land * 0.3);
+      hint({ x0: x - 1000, x1: x - 5, kick: true, v: Math.sqrt(v * v + 2 * G * hK + 2 * (ROLL + AIR * v * v) * Lk * 1.2) * 1.02 });
+      hint({ x0: x - 5, x1: tx + 1, coast: true });
+      const arc = []; ballistic(tx, ty, Math.cos(A) * v, -Math.sin(A) * v, 70, 10, (px, py) => py > ly - 5 && px > lx, arc, true);
+      B.coins.push(...arc);
+      B.end();
+      // the wrong way: a comfortable road below with bait coins, then a hidden trapdoor over lava
+      const by = y + 180, trapX = lx + 520;
+      B.walls.push(W(tx, ty + 8, tx, by));
+      B.gr.push(makeGround(Path(tx - 10, by).line(trapX, by).pts, 1));
+      for (let k = 0; k < 2; k++) {
+        const x0 = trapX + k * 160;
+        B.gr.push(makeGround(Path(x0, by + 1 + k).line(x0 + 160, by + 1 + k).pts, 1, { pivot: [x0, by + 1 + k] }));
+        B.flaps.push({ gi: B.gr.length - 1, dir: 1, delay: 0.05, hidden: true });
+      }
+      B.spikes.push({ x: trapX, y: by + 200, w: 320, h: 70, dir: 'lava' });
+      B.walls.push(W(trapX + 320, by - 150, trapX + 320, by + 270), W(trapX, by + 8, trapX, by + 270));
+      B.decor.hatch.push([trapX + 320, by - 150, 30, 420], [tx - 30, by, lx + 900 - tx, 0]);
+      coinsFlat(tx + 60, trapX + 300, by, 70);
+      B.decor.warns.push({ x: x - 60, y: y - 120, q: true });
+      // the right way, up high
+      B.walls.push(W(lx, ly + 8, lx, by - 70));
+      B.decor.hatch.push([lx, ly, 30, by - 70 - ly], [lx, ly, land, 30]);
+      B.begin(lx, ly).flat(land);
+      return B;
+    };
+    B.flight = (len, centers) => { // wings: fly through gates, gas = up, brake = down
+      const x = X(), y = Y();
+      B.flat(80);
+      B.floaters.push({ x: x + 50, y: y - 45, kind: 'wings' });
+      hint({ x0: x - 300, x1: x + 80, v: 300 });
+      B.end();
+      const sx = x + 80, ex = sx + len, top = y - 460, floor = y + 260;
+      B.spikes.push({ x: sx, y: floor - 70, w: len, h: 70, dir: 'lava' }, { x: sx, y: top, w: len, h: 40, dir: 'down' });
+      B.decor.hatch.push([sx, top - 30, len, 30]);
+      const gates = [];
+      const n = centers.length;
+      for (let i = 0; i < n; i++) {
+        const gx = sx + len * (i + 1) / (n + 1), cy = y + centers[i], gh = 210;
+        gates.push([gx, cy]);
+        B.spikes.push({ x: gx - 25, y: top + 40, w: 50, h: cy - gh / 2 - top - 40, dir: 'pillarTop' });
+        B.spikes.push({ x: gx - 25, y: cy + gh / 2, w: 50, h: floor - 70 - cy - gh / 2, dir: 'pillarBottom' });
+        B.coins.push({ x: gx, y: cy });
+      }
+      B.hints.push({ flight: true, gates, landX: ex + 40, landY: y });
+      B.walls.push(W(ex, y + 8, ex, floor));
+      B.decor.hatch.push([ex, y, 30, floor - y]);
+      B.begin(ex, y); B.p.kind('soft').line(ex + 400, y).kind('normal');
+      return B.flat(200);
+    };
+    B.wheelTunnel = len => { // low ceiling: only small wheels fit
+      const x = X(), y = Y();
+      B.wheelSw_.push({ x: x + 40, y, size: 0.6 });
+      B.flat(160);
+      B.spikes.push({ x: x + 160, y: y - 88, w: len, h: 32, dir: 'down' });
+      B.decor.hatch.push([x + 160, y - 118, len, 30]);
+      hint({ x0: x - 200, x1: x + len + 300, v: 320 });
+      B.flat(len, 90);
+      B.wheelSw_.push({ x: X() + 60, y, size: 1 });
+      return B.flat(160);
+    };
+    B.spikeCarpet = len => { // low spikes on the ground: big wheels roll over them
+      const x = X(), y = Y();
+      B.wheelSw_.push({ x: x + 40, y, size: 1.8 });
+      B.flat(160);
+      B.spikes.push({ x: x + 160, y: y - 22, w: len, h: 22, dir: 'up', low: true });
+      hint({ x0: x - 200, x1: x + len + 300, v: 320 });
+      B.flat(len, 110);
+      B.wheelSw_.push({ x: X() + 140, y, size: 1 }); // after the rear wheel has left the carpet
+      return B.flat(240);
+    };
+    B.fortuneWheel = () => {
+      const x = X(), y = Y();
+      B.fortunes_.push({ x: x + 180, y, used: false });
+      return B.flat(380);
+    };
+    B.secretBelt = () => { // a belt far too strong to beat — a hidden button behind you turns it around
+      const x = X(), y = Y();
+      hint({ x0: x - 300, x1: x, v: 160 });
+      B.end();
+      const fy = y + 150, bi = B.buttons_.length;
+      B.decor.hatch.push([x - 300, y, 300, 40]);
+      B.begin(x - 360, fy - 50); B.p.cubic(x - 330, fy, x - 320, fy, x - 290, fy);
+      B.flat(x + 300 - (x - 290));
+      B.p.kind('conv', -2.2).line(x + 800, fy).kind('normal');
+      B.flat(150);
+      B.p.cubic(X() + 150, fy, X() + 150, y, X() + 300, y);
+      const btn = { x: x - 240, w: 70, y: fy, target: { type: 'flip' }, color: '#9e9e9e', hidden: true };
+      B.buttons_.push(btn);
+      later(gi => (btn.target.gi = gi));
+      const fh = { secret: bi, btnX: x - 205, x0: x - 400, x1: x + 1300 };
+      B.hints.push(fh); later(gi => (fh.gi = gi));
+      coinsFlat(x + 320, x + 780, fy, 80);
+      return B.flat(250);
+    };
+    B.slingshot = () => { // drive in, aim, shoot through the bullseye — everything else is lava or wall
+      B.flat(140);
+      const x = X(), y = Y(), sx = x;
+      B.flat(60);
+      B.end();
+      const tx = sx + 760, ty = y - 230, r = 60, board = 130;
+      const exit = { x: tx + 110, y: ty + 40 };
+      const i = B.slings_.length;
+      B.slings_.push({ x: sx, y, target: { x: tx, y: ty, r, board }, exit });
+      // find an angle/power the bot (and a careful player) can use
+      const lx = sx + 30, ly = y - 40, cross = (a, p) => {
+        let px = lx, py = ly, vx = Math.cos(a) * p, vy = -Math.sin(a) * p;
+        for (let k = 0; k < 2400; k++) { const dt = 1 / 240; vy += G * dt; const sp = Math.hypot(vx, vy); vx -= AIR * 0.5 * vx * sp * dt; vy -= AIR * 0.5 * vy * sp * dt; const nx = px + vx * dt; if (px < tx && nx >= tx) return py - 30; px = nx; py += vy * dt; if (vx <= 0) break; }
+        return Infinity;
+      };
+      let best = null;
+      for (let a = SLING.mid - SLING.amp + 0.05; a < SLING.mid + SLING.amp; a += 0.01) {
+        let lo = SLING.pmin, hi = SLING.pmax;
+        for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (cross(a, m) > ty) lo = m; else hi = m; } // more power → higher at the board
+        const p = (lo + hi) / 2;
+        if (Math.abs(cross(a, p) - ty) < 3 && (!best || Math.abs(a - 0.85) < Math.abs(best.a - 0.85))) best = { a, p };
+      }
+      B.hints.push({ sling: i, angle: best.a, power: best.p });
+      // lava below, walls above and below the board
+      B.spikes.push({ x: sx + 60, y: y + 190, w: tx + 70 - sx - 60, h: 70, dir: 'lava' });
+      B.walls.push(W(sx + 60, y + 8, sx + 60, y + 260));
+      B.decor.hatch.push([sx + 30, y, 30, 260], [tx - 8, ty + board, 16, y + 260 - ty - board]);
+      B.decor.warns.push({ x: sx - 80, y: y - 90 });
+      for (let k = 1; k < 6; k++) { const ccx = lx + (tx - lx) * k / 6; B.coins.push({ x: ccx, y: ty + 20 - Math.sin(k / 6 * PI) * 120 }); }
+      B.begin(tx + 40, ty + 70).flat(450);
+      return B;
+    };
     B.mark = () => { B.guard = X(); return B; };
     B.x = X; B.y = Y; B.bounds = () => { let lo = Infinity, hi = -Infinity; for (const g of B.gr) for (const q of g.pts) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); } if (B.p) for (const q of B.p.pts) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); } return [lo, hi]; };
     B.checkpoint = () => {
@@ -799,11 +968,13 @@
     };
     B.sections = []; B.saws_ = []; B.crush = []; B.lowG = []; B.birds_ = []; B.floaters = []; B.cannons_ = []; B.doors_ = []; B.buttons_ = [];
     B.piranhas_ = []; B.hail_ = []; B.pend_ = []; B.drops_ = []; B.decor.clouds = []; B.decor.cables = [];
+    B.seesaws_ = []; B.fortunes_ = []; B.wheelSw_ = []; B.decor.pivots = []; B.slings_ = [];
     B.build = () => ({
       name: B.name, start: B.start, grounds: B.gr, walls: B.walls, coins: B.coins, spikes: B.spikes,
       gates: [], buttons: B.buttons.concat(B.buttons_), movers: B.movers, flaps: B.flaps, saws: B.saws_, fans: B.fans,
       portals: B.portals, waters: B.waters, crushers: B.crush, lowG: B.lowG, theme: B.theme, birds: B.birds_, floaters: B.floaters,
-      cannons: B.cannons_, doors: B.doors_, piranhas: B.piranhas_, hail: B.hail_, pendulums: B.pend_, dropSpikes: B.drops_, special: B.special, checkpoints: B.checkpoints, finish: B.finish,
+      cannons: B.cannons_, doors: B.doors_, piranhas: B.piranhas_, hail: B.hail_, pendulums: B.pend_, dropSpikes: B.drops_, special: B.special,
+      seesaws: B.seesaws_, fortunes: B.fortunes_, wheelSwitches: B.wheelSw_, slings: B.slings_, checkpoints: B.checkpoints, finish: B.finish,
       deathY: B.deathY, deathRects: B.deathRects, decor: B.decor, hints: B.hints, sections: B.sections,
     });
     return B;
@@ -1007,23 +1178,32 @@
     28: 'Zirkus', 29: 'Dschungel', 30: '⭐ Extra: Sturm', 31: 'Fabrikhalle', 32: 'Sternenstaub', 33: 'Wasserwelt', 34: 'Kanonade', 35: 'Lava-Lauf',
     36: 'Geisterbahn', 37: 'Frosthölle', 38: 'Vogelschwarm', 39: 'Labyrinth', 40: '⭐ Extra: Albtraum', 41: 'Turbo', 42: 'Himmelsleiter', 43: 'Unterwelt',
     44: 'Eiszeit', 45: 'Feuerwerk', 46: 'Chaos', 47: 'Präzision', 48: 'Höllenritt', 49: 'Der letzte Weg', 50: '⭐ Extra: Endgegner',
+    51: '☠ Wüstensturm', 52: '☠ Mondbasis', 53: '☠ Sonnenglut', 54: '☠ Tiefsee', 55: '☠ Strandparty', 56: '☠ Dschungeltempel',
+    57: '☠ Gletscherspalte', 58: '☠ Neonstadt', 59: '☠ Vulkanherz', 60: '⭐☠ Extra: Weltall',
   };
   const FOCUS = {
+    51: ['seesaw', 'fork', 'lava'], 52: ['flight', 'moon', 'moonTramp'], 53: ['lift', 'lava', 'cannon'], 54: ['tunnel', 'carpet', 'piranha'],
+    55: ['fortune', 'fork', 'tramp', 'balloon'], 56: ['secret', 'fork', 'drops', 'birds'], 57: ['seesaw', 'tunnel', 'carpet', 'hail'],
+    58: ['flight', 'lift', 'crush'], 59: ['fork', 'secret', 'lava', 'lift', 'seesaw'], 60: ['lift', 'seesaw', 'fork', 'flight', 'tunnel', 'carpet', 'secret', 'fortune'],
     24: ['saws', 'birds', 'drops'], 25: ['lava', 'cannon'], 26: ['elev', 'fanUp', 'bubble'], 27: ['kick', 'stairs'], 28: ['tramp', 'cannon', 'balloon', 'ballpit'],
     29: ['birds', 'piranha', 'pendulum'], 31: ['crush', 'rev', 'saws'], 32: ['moon', 'moonTramp'], 33: ['pool', 'piranha', 'ballpit'], 34: ['cannon'],
     35: ['lava', 'kick'], 36: ['pendulum', 'drops', 'wheel'], 37: ['hail', 'kick'], 38: ['birds'], 39: ['door', 'mover', 'elev'], 41: ['loop', 'wall', 'hump'],
     42: ['bubble', 'balloon', 'elev', 'cable'], 43: ['lava', 'shaft', 'drops'], 44: ['hail', 'kick', 'stairs'], 45: ['cannon', 'balloon'], 47: ['kick', 'tramp', 'moon'],
     48: ['lava', 'crush', 'saws'], 49: ['pendulum', 'hail', 'birds', 'drops'],
   };
+  // every generated level gets its own background (themes are purely visual)
+  const THEME_CYCLE = ['desert', 'beach', 'forest', 'snow', 'sunset', 'city', 'underwater', 'volcano', 'moon', 'space', 'sun', 'candy'];
+  const HARD_THEME = { 51: 'desert', 52: 'moon', 53: 'sun', 54: 'underwater', 55: 'beach', 56: 'forest', 57: 'snow', 58: 'city', 59: 'volcano', 60: 'space' };
   function genLevel(n, seed) {
-    const rnd = rng(seed), d = Math.min(1.15, (n - 11) / 39 + (n % 10 === 0 ? 0.25 : 0));
+    const hard = n > 50;
+    const rnd = rng(seed), d = hard ? Math.min(1.45, 1.15 + (n - 51) * 0.03 + (n % 10 === 0 ? 0.1 : 0)) : Math.min(1.15, (n - 11) / 39 + (n % 10 === 0 ? 0.25 : 0));
     const special = n % 10 === 0;
     const B = Builder(`Level ${n} · ${GEN_NAMES[n]}`);
     B.special = special;
     B.ceilMargin = Math.max(16, 28 - 12 * d);
     B.maxApproach = 960;
-    if (n % 6 === 0) B.theme = 'night';
-    const icy = n % 8 === 3 || n === 44 || n === 37;
+    B.theme = hard ? HARD_THEME[n] : n % 6 === 0 ? 'night' : THEME_CYCLE[(n - 11) % THEME_CYCLE.length];
+    const icy = hard ? n === 57 : n % 8 === 3 || n === 44 || n === 37;
     const lavaOn = n >= 15, lavaLevel = n >= 15 && (n % 5 === 0 || rnd() < 0.2);
     if (lavaLevel) B.lavaPits = true;
     const pick = a => a[Math.floor(rnd() * a.length)];
@@ -1064,6 +1244,18 @@
       cable: () => B.cableCar(900 + d * 400, R(100, 250), lava()),
       bubble: () => B.bubbleLift(R(250, 310)),
       drops: () => B.dropSpikes(R(700, 1100), I(2, 2 + Math.round(3 * d))),
+      lift: () => B.balanceLift(R(420, 520), 600 + d * 150),
+      seesaw: () => B.seesaw(),
+      fork: () => { run(icy ? 1400 : 650); B.forkTrap(); },
+      flight: () => {
+        const k = I(4, 7), c = []; let v = R(-150, 30);
+        for (let i = 0; i < k; i++) { c.push(Math.round(v)); v = Math.max(-200, Math.min(60, v + R(-140, 140))); }
+        B.flight(420 * (k + 1), c);
+      },
+      tunnel: () => B.wheelTunnel(R(500, 800)),
+      carpet: () => B.spikeCarpet(R(500, 800)),
+      fortune: () => B.fortuneWheel(),
+      secret: () => B.secretBelt(),
     };
     const base = ['kick', 'tramp', 'saws', 'crush', 'flaps', 'stairs', 'bumps', 'loop', 'hump', 'wall', 'pool', 'elev', 'mover', 'shaft', 'drop', 'fanUp', 'moon', 'moonTramp', 'wheel', 'rev'];
     const unlocked = Object.keys(INTRO).filter(k => Number(k) <= n).map(k => INTRO[k]);
@@ -1071,8 +1263,9 @@
     const focusList = FOCUS[n] || (intro ? [intro] : null);
     const focusPick = () => focusList ? pick(focusList) : null;
     const focus = focusPick();
-    const pool = base.concat(unlocked);
-    const count = 7 + Math.round(7 * Math.min(1, d)) + (special ? 3 : 0);
+    const extreme = ['lift', 'seesaw', 'fork', 'flight', 'tunnel', 'carpet', 'secret'];
+    const pool = hard ? base.concat(unlocked, extreme, extreme) : base.concat(unlocked);
+    const count = hard ? 15 + (special ? 4 : 0) : 7 + Math.round(7 * Math.min(1, d)) + (special ? 3 : 0);
     const cpEvery = d < 0.5 ? 3 : 4;
     B.begin(0, 0).flat(120).startHere(special ? 'EXTRA' : 'START').flat(250, 80);
     let lastKey = null, row = 0;
@@ -1092,15 +1285,21 @@
         B.flat(200).portalTo(0, hi + 1100, colors[row++ % colors.length]).flat(200);
       }
     }
+    if ([53, 56, 59, 60].includes(n)) { // the slingshot guards the finish (no random numbers used, so the rest stays the same)
+      B.mark(); run(450); B.checkpoint(); B.flat(300); B.mark();
+      const sec = { key: 'sling', g0: B.gr.length, x0: B.x() };
+      B.slingshot(); B.flat(150);
+      sec.g1 = B.gr.length; sec.x1 = B.x(); B.sections.push(sec);
+    }
     B.mark(); run(450);
     B.finishLine(700);
     if (special) B.coins.forEach((c, i) => { if (i % 6 === 3) c.v = 5; });
     return B.build();
   }
   // seeds picked by the offline validator (every level is solvable by the test bot)
-  const SEEDS = { 11: 11000, 12: 12000, 13: 13000, 14: 14000, 15: 15000, 16: 16000, 17: 17000, 18: 18001, 19: 19000, 20: 20000, 21: 21000, 22: 22000, 23: 23000, 24: 24000, 25: 25000, 26: 26005, 27: 27007, 28: 28000, 29: 29000, 30: 30000, 31: 31000, 32: 32001, 33: 33000, 34: 34000, 35: 35007, 36: 36000, 37: 37004, 38: 38000, 39: 39002, 40: 40000, 41: 41000, 42: 42000, 43: 43000, 44: 44010, 45: 45000, 46: 46001, 47: 47000, 48: 48000, 49: 49001, 50: 50000 };
+  const SEEDS = { 11: 11000, 12: 12000, 13: 13000, 14: 14000, 15: 15000, 16: 16000, 17: 17000, 18: 18001, 19: 19000, 20: 20000, 21: 21000, 22: 22000, 23: 23000, 24: 24000, 25: 25000, 26: 26005, 27: 27007, 28: 28000, 29: 29000, 30: 30000, 31: 31000, 32: 32001, 33: 33000, 34: 34000, 35: 35007, 36: 36000, 37: 37004, 38: 38000, 39: 39002, 40: 40000, 41: 41000, 42: 42000, 43: 43000, 44: 44010, 45: 45000, 46: 46001, 47: 47000, 48: 48000, 49: 49001, 50: 50000, 51: 51000, 52: 52011, 53: 53003, 54: 54004, 55: 55000, 56: 56002, 57: 57017, 58: 58004, 59: 59000, 60: 60000 };
   const LEVELS = [level1, level2, level3, level4, level5, level6, level7, level8, level9, level10];
-  for (let n = 11; n <= 50; n++) LEVELS.push(() => genLevel(n, SEEDS[n] !== undefined ? SEEDS[n] : n * 1000));
+  for (let n = 11; n <= 60; n++) LEVELS.push(() => genLevel(n, SEEDS[n] !== undefined ? SEEDS[n] : n * 1000));
 
   // ---------- geometry ----------
   function segIntersect(px, py, qx, qy, s) {
@@ -1117,7 +1316,7 @@
 
   // ---------- game ----------
   function createGame(levelIndex) {
-    const L = Object.assign({ gates: [], buttons: [], movers: [], flaps: [], saws: [], fans: [], portals: [], waters: [], crushers: [], lowG: [], birds: [], floaters: [], cannons: [], doors: [], piranhas: [], hail: [], pendulums: [], dropSpikes: [], deathRects: [], walls: [] }, typeof levelIndex === 'function' ? levelIndex() : LEVELS[levelIndex || 0]());
+    const L = Object.assign({ gates: [], buttons: [], movers: [], flaps: [], saws: [], fans: [], portals: [], waters: [], crushers: [], lowG: [], birds: [], floaters: [], cannons: [], doors: [], piranhas: [], hail: [], pendulums: [], dropSpikes: [], seesaws: [], fortunes: [], wheelSwitches: [], slings: [], deathRects: [], walls: [] }, typeof levelIndex === 'function' ? levelIndex() : LEVELS[levelIndex || 0]());
     const coins = L.coins.map(c => ({ x: c.x, y: c.y, v: c.v || 1, taken: false }));
     L.gates.forEach(g => { g.open = 0; g.opening = false; });
 
@@ -1155,7 +1354,10 @@
       L.doors.forEach(d => { d.open = 0; d.opening = false; });
       L.floaters.forEach(f => (f.taken = false));
       L.dropSpikes.forEach(d => { d.state = 'hang'; d.y = d.y0; d.vy = 0; });
-      S.float = null; S.cannonCd = 0;
+      S.float = null; S.fly = null; S.cannonCd = 0; S.wheels = 1; S.sling = null; S.slingShot = undefined; S.slingCd = 0;
+      L.seesaws.forEach(w => { w.rot = -w.maxA; w.omega = 0; const g = L.grounds[w.gi]; g.rot = w.rot; transformGround(g); });
+      L.fortunes.forEach(f => (f.used = false));
+      L.grounds.forEach(g => { if (g.flipped) { g.base.forEach(q => (q[3] = -q[3])); g.flipped = false; transformGround(g); } });
     }
 
     function reset(full) {
@@ -1182,13 +1384,16 @@
     function bikePoints() {
       const ux = Math.sin(S.theta), uy = -Math.cos(S.theta);
       const fx = S.facing * Math.cos(S.theta), fy = S.facing * Math.sin(S.theta);
+      // wheel size switch: big wheels lift the bike, small wheels duck the rider
+      const ws = S.wheels || 1, wr = WHEEL_R * ws, lift = wr - WHEEL_R;
+      const head = ws < 1 ? 48 : HEAD + lift * 1.2;
       return {
         up: [ux, uy], fwd: [fx, fy],
         pos: [S.x, S.y],
-        center: [S.x + ux * 30, S.y + uy * 30],
-        head: [S.x + ux * HEAD, S.y + uy * HEAD],
-        front: [S.x + fx * (WHEEL_X + WHEEL_R) + ux * WHEEL_R, S.y + fy * (WHEEL_X + WHEEL_R) + uy * WHEEL_R],
-        rear: [S.x - fx * (WHEEL_X + WHEEL_R) + ux * WHEEL_R, S.y - fy * (WHEEL_X + WHEEL_R) + uy * WHEEL_R],
+        center: [S.x + ux * (30 + lift), S.y + uy * (30 + lift)],
+        head: [S.x + ux * head, S.y + uy * head],
+        front: [S.x + fx * (WHEEL_X + wr) + ux * wr, S.y + fy * (WHEEL_X + wr) + uy * wr],
+        rear: [S.x - fx * (WHEEL_X + wr) + ux * wr, S.y - fy * (WHEEL_X + wr) + uy * wr],
       };
     }
 
@@ -1220,7 +1425,8 @@
         else if (S.v > -REV_MAX) a -= REV_ACC * (ice ? 0.45 : 1);
         else a += br;
       }
-      if (s.kind === 'conv' && S.v * s.conv < CONV_MAX) a += s.conv * CONV_ACC * (s.conv < 0 ? 0.47 : 1); // backward belts are beatable with full gas
+      if (g.convWave) a += g.convWave.amp * Math.sin(g.convWave.phase + g.convWave.speed * S.clock); // balance lift: belt pushes back and forth
+      else if (s.kind === 'conv' && S.v * s.conv < CONV_MAX) a += s.conv * CONV_ACC * (s.conv < 0 ? 0.47 : 1); // backward belts are beatable with full gas (strong ones are not)
       if (inWater()) a -= S.v * 2.2;
       a -= Math.sign(S.v) * (ice ? 0 : ROLL) + AIR * S.v * Math.abs(S.v);
       const v0 = S.v;
@@ -1295,6 +1501,15 @@
 
       let gf = 1;
       for (const z of L.lowG) if (inRectP(S.x, S.y, z)) gf = z.g;
+      if (S.fly) { // flight mode: steady forward speed, gas = up, brake = down
+        S.fly.t -= dt;
+        S.vx += (360 - S.vx) * Math.min(1, 3 * dt);
+        if (inp.up) S.vy -= 1300 * dt;
+        if (inp.down) S.vy += 1300 * dt;
+        S.vy *= Math.exp(-1.6 * dt);
+        S.vy = Math.max(-400, Math.min(400, S.vy)) - G * gf * dt;
+        if (S.fly.t <= 0) { S.fly = null; S.events.push('pop'); }
+      }
       if (S.float) {
         S.float.t -= dt;
         if (S.float.kind === 'balloon') {
@@ -1309,6 +1524,18 @@
         if (S.float.t <= 0) { S.float = null; S.events.push('pop'); }
       }
       S.vy += G * gf * dt;
+      if (S.slingShot !== undefined) { // flying from the slingshot: judged when crossing the target board
+        const sl = L.slings[S.slingShot], tg = sl.target;
+        const nx = S.x + S.vx * dt;
+        if (S.x < tg.x && nx >= tg.x) {
+          const cy = S.y - 30 + S.vy * dt * (tg.x - S.x) / (nx - S.x), dd = Math.abs(cy - tg.y);
+          if (dd < tg.r) {
+            S.slingShot = undefined; S.x = sl.exit.x; S.y = sl.exit.y; S.vx = 260; S.vy = 0; S.theta = 0; S.airTime = 0; S.leftGi = -1;
+            S.events.push('bullseye'); return;
+          }
+          crash(dd < tg.board ? 'Daneben! Triff ins Schwarze.' : 'Vorbei! Triff ins Schwarze.'); return; // over or under the board counts as a miss too
+        }
+      }
       for (const f of L.fans) if (inRectP(S.x, S.y - 30, f)) S.vy += (f.vt - S.vy) * Math.min(1, 5 * dt) - G * gf * dt; // fan carries you: vertical speed goes to vt
       const wz = inWater();
       if (wz) { if (wz.style !== 'balls') S.vy -= G * 0.6 * dt; const k = Math.exp(-(wz.style === 'balls' ? 3 : 2) * dt); S.vx *= k; S.vy *= k; }
@@ -1343,7 +1570,7 @@
           if (ang > LAND_ANGLE_MAX) { crash('Falsch gelandet! Achte auf dein Tempo.'); return; }
           if (vn > IMPACT_MAX) { crash('Zu harte Landung! Weniger Tempo.'); return; }
         }
-        S.mode = 'ground'; S.float = null;
+        S.mode = 'ground'; S.float = null; S.fly = null; S.slingShot = undefined;
         S.u = Math.hypot(S.x - s.ax, S.y - s.ay);
         S.v = rvx * s.tx + rvy * s.ty;
         S.events.push('land');
@@ -1379,6 +1606,29 @@
       const yb = c.ground - 85 + 85 * Math.sin(c.phase + c.speed * t); // bottom edge of the block
       return { x: c.x, y: yb - 140, w: c.w, h: 140 };
     }
+    // slingshot: the arrow swings until you press gas (direction), then the power swings until you let go
+    function stepSling(dt, inp) {
+      const sg = S.sling;
+      if (!inp.up) sg.armed = true;
+      if (!sg.charging) {
+        sg.t += dt;
+        sg.angle = SLING.mid + SLING.amp * Math.sin(SLING.aimSpeed * sg.t);
+        S.theta = -sg.angle;
+        if (inp.up && sg.armed) { sg.charging = true; sg.ct = 0; S.events.push('slingAim'); }
+      } else if (inp.down) {
+        sg.charging = false; sg.armed = false;
+      } else if (inp.up) {
+        sg.ct += dt;
+        const ph = (sg.ct / SLING.powerTime) % 2;
+        sg.power = SLING.pmin + (SLING.pmax - SLING.pmin) * (ph < 1 ? ph : 2 - ph);
+      } else { // let go: fire
+        const sl = L.slings[sg.i];
+        S.mode = 'air'; S.airTime = 0; S.leftGi = -1; S.slingShot = sg.i; S.slingCd = 1.5;
+        S.vx = Math.cos(sg.angle) * sg.power; S.vy = -Math.sin(sg.angle) * sg.power;
+        S.x = sl.x + 30; S.y = sl.y - 40; S.theta = -sg.angle;
+        S.sling = null; S.events.push('slingShot');
+      }
+    }
     function sawPos(sw) {
       const a = sw.phase + sw.speed * S.clock;
       return [sw.cx + sw.orbit * Math.cos(a), sw.cy + sw.orbit * Math.sin(a)];
@@ -1395,7 +1645,7 @@
         if (segIntersect(prev[k][0], prev[k][1], P[k][0], P[k][1], w) >= 0) { crash('Gegen die Wand gekracht!'); return; }
       }
       const inRect = (p, r) => p[0] >= r.x && p[0] <= r.x + r.w && p[1] >= r.y && p[1] <= r.y + r.h;
-      for (const sp of L.spikes) for (const p of pts) if (inRect(p, sp)) { crash(sp.dir === 'lava' ? 'In die Lava gefallen!' : 'Stacheln berührt!'); return; }
+      for (const sp of L.spikes) if (!(sp.low && S.wheels > 1.2)) for (const p of pts) if (inRect(p, sp)) { crash(sp.dir === 'lava' ? 'In die Lava gefallen!' : 'Stacheln berührt!'); return; }
       for (const gt of L.gates) {
         const top = Math.max(gt.ceiling, gt.top - gt.open), bottom = gt.bottom - gt.open;
         if (bottom > top) {
@@ -1417,7 +1667,8 @@
       for (const f of L.floaters) {
         if (f.taken || Math.hypot(P.center[0] - f.x, P.center[1] - f.y) > 50) continue;
         f.taken = true; S.events.push(f.kind);
-        S.float = { kind: f.kind, t: f.kind === 'balloon' ? 4.2 : 2.8 };
+        if (f.kind === 'wings') { S.fly = { t: 30 }; S.float = null; }
+        else S.float = { kind: f.kind, t: f.kind === 'balloon' ? 4.2 : 2.8 };
         if (S.mode === 'ground') { syncFromGround(); takeoff(S.vx - L.grounds[S.gi].vx, -80); }
       }
       // cannons
@@ -1441,6 +1692,7 @@
             b.pressed = true; S.events.push('button');
             if (b.target.type === 'gate') L.gates[b.target.i].opening = true;
             else if (b.target.type === 'door') L.doors[b.target.i].opening = true;
+            else if (b.target.type === 'flip') { const g = L.grounds[b.target.gi]; g.base.forEach(q => (q[3] = -q[3])); g.flipped = !g.flipped; transformGround(g); }
             else L.movers[b.target.i].active = true;
             break;
           }
@@ -1456,6 +1708,20 @@
           S.portalCd = 0.5; S.events.push('portal');
           return;
         }
+      }
+      if (S.slingCd > 0) S.slingCd -= 1 / 240;
+      if (S.mode === 'ground' && S.slingCd <= 0) for (let i = 0; i < L.slings.length; i++) {
+        const sl = L.slings[i];
+        if (Math.abs(S.x - sl.x) < 20 && Math.abs(S.y - sl.y) < 20) {
+          S.mode = 'sling'; S.v = 0; S.vx = 0; S.vy = 0; S.x = sl.x + 30; S.y = sl.y - 40; S.theta = -SLING.mid; S.facing = 1; // sits in the pocket
+          S.sling = { i, t: 0, angle: SLING.mid, charging: false, armed: false, ct: 0, power: SLING.pmin };
+          S.events.push('slingIn');
+          return;
+        }
+      }
+      if (S.mode === 'ground') {
+        for (const f of L.fortunes) if (!f.used && Math.abs(S.x - f.x) < 30 && Math.abs(S.y - f.y) < 30) { f.used = true; S.fortuneHit = f; S.events.push('fortune'); }
+        for (const w of L.wheelSwitches) if (Math.abs(S.x - w.x) < 22 && Math.abs(S.y - w.y) < 20 && S.wheels !== w.size) { S.wheels = w.size; S.events.push('wheels'); }
       }
       // coins
       for (const c of coins) {
@@ -1517,12 +1783,23 @@
       if (S.status !== 'run') return;
       S.time += dt; S.clock += dt;
       for (const m of L.movers) applyMover(m, dt);
+      for (const w of L.seesaws) { // the plank tips towards the side the bike is on
+        const g = L.grounds[w.gi];
+        const on = S.mode === 'ground' && S.gi === w.gi;
+        w.omega += (on ? (S.x - g.pivot[0]) * 0.012 : 0) * dt;
+        w.omega *= Math.exp(-2.5 * dt);
+        w.rot += w.omega * dt;
+        if (w.rot > w.maxA) { w.rot = w.maxA; w.omega = 0; } else if (w.rot < -w.maxA) { w.rot = -w.maxA; w.omega = 0; }
+        const vy0 = g.rot; g.rot = w.rot; transformGround(g); g.vx = 0; g.vy = 0;
+      }
+      for (const g of L.grounds) if (g.convWave) { const sg = Math.sign(Math.sin(g.convWave.phase + g.convWave.speed * S.clock)) || 1; g.base.forEach(q => { if (q[2] === 'conv') q[3] = sg; }); }
       stepFlaps(dt);
       for (const d of L.doors) if (d.opening) d.open = Math.min(d.bottom - d.top, d.open + 320 * dt);
       for (const d of L.dropSpikes) {
         if (d.state === 'hang' && S.x > d.x - d.trigger && S.x < d.x) d.state = 'fall';
         if (d.state === 'fall') { d.vy += 1600 * dt; d.y += d.vy * dt; if (d.y >= d.ground) { d.state = 'gone'; S.events.push('shatter'); } }
       }
+      if (S.mode === 'sling') { stepSling(dt, inp); return; }
       const prev = bikePoints();
       const pre = { mode: S.mode, gi: S.gi, si: S.si, u: S.u, x: S.x, y: S.y };
       if (S.mode === 'ground') { syncFromGround(); stepGround(dt, inp); } else stepAir(dt, inp);
@@ -1546,7 +1823,7 @@
     return { S, step, reset, bikePoints, coins, L, sawPos, crusherRect, timedShapes, birdPos, pendulumPos, piranhaPos, hailPos, placeOnGround, consts: { HEAD, WHEEL_R, WHEEL_X } };
   }
 
-  const api = { createGame, levelCount: LEVELS.length, Builder, genLevel, SEEDS };
+  const api = { createGame, levelCount: LEVELS.length, Builder, genLevel, SEEDS, SLING };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MotoTrial = api;
 })(this);

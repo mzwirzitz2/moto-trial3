@@ -5,7 +5,7 @@
 //
 // One key per level ("lb:<level>") holds the best entry per player, sorted.
 
-const LEVELS = 50;   // levels 0..49
+const LEVELS = 60;   // levels 0..59
 const KEEP = 50;     // entries stored per level
 const SHOW = 10;     // entries returned per level
 
