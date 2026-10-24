@@ -57,6 +57,8 @@
   table.scores tr.me td { background: #fff3c4; font-weight: bold; }
   .world { font-size: 17px; }
   #panel .hint { font-size: 13px; color: #777; margin: 4px 0; }
+  #panel input.bigname { font: inherit; font-size: 22px; padding: 8px 12px; border: 3px solid #333; border-radius: 12px; width: min(260px, 80%); text-align: center; pointer-events: auto; }
+  #panel button.big.dim { opacity: .55; }
   #pname { font: inherit; padding: 3px 8px; border: 2px solid #333; border-radius: 8px; width: 140px; }
   .shop { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
   #panel button.item { padding: 4px 8px; font-size: 14px; display: flex; flex-direction: column; align-items: center; min-width: 74px; }
@@ -191,6 +193,7 @@
     $('padBrake').classList.toggle('on', keys.down);
   }
   function proceed() {
+    if (S.status === 'ready' && needName()) return;
     if (S.status === 'ready') start();
     else if (S.status === 'crash') { if (performance.now() - crashAt > 450) respawn(); }
     else if (S.status === 'finish') nextLevel();
@@ -226,7 +229,7 @@
   function toMenu() { menuTab = 'levels'; crashBike = null; game.reset(true); pointers.clear(); held.clear(); syncKeys(); updatePanel(); }
   $('mute').addEventListener('click', e => { e.stopPropagation(); initAudio(); toggleMute(); });
 
-  function start() { if (S.status === 'ready' && !isUnlocked(levelIndex)) return; if (S.status === 'ready') { S.status = 'run'; finishedRecord = null; } crashBike = null; updatePanel(); }
+  function start() { if (S.status === 'ready' && (!isUnlocked(levelIndex) || needName())) return; if (S.status === 'ready') { S.status = 'run'; finishedRecord = null; } crashBike = null; updatePanel(); }
   function respawn() { game.reset(false); crashBike = null; updatePanel(); }
 
   // ---------- profile: wallet, garage, results (all local) ----------
@@ -270,6 +273,9 @@
   const highestUnlocked = () => { let i = 0; while (i + 1 < MotoTrial.levelCount && isUnlocked(i + 1)) i++; return i; };
   if (!isUnlocked(levelIndex)) loadLevel(highestUnlocked());
   if (!profile.id) profile.id = (self.crypto && crypto.randomUUID ? crypto.randomUUID() : 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+  // players who already picked a name (older versions) don't get asked again
+  if (profile.named === undefined) profile.named = profile.name !== 'Spieler';
+  const needName = () => !profile.named;
   const saveProfile = () => store.set('mototrial-profile', profile);
   saveProfile();
 
@@ -453,7 +459,7 @@
     const pl = $('prevL'), nl = $('nextL');
     if (pl) pl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + MotoTrial.levelCount - 1) % MotoTrial.levelCount; worldLoad(scoreLevel, true); updatePanel(); };
     if (nl) nl.onclick = e => { e.stopPropagation(); scoreLevel = (scoreLevel + 1) % MotoTrial.levelCount; worldLoad(scoreLevel, true); updatePanel(); };
-    const pn = $('pname'); if (pn) { pn.onkeydown = e => e.stopPropagation(); pn.oninput = () => { profile.name = pn.value || 'Spieler'; saveProfile(); }; }
+    const pn = $('pname'); if (pn) { pn.onkeydown = e => e.stopPropagation(); pn.oninput = () => { profile.name = pn.value || 'Spieler'; profile.named = true; saveProfile(); }; }
     p.querySelectorAll('.item').forEach(b => b.onclick = e => {
       e.stopPropagation();
       const cat = b.dataset.cat, it = SHOP[cat].find(i => i.id === b.dataset.id);
@@ -487,7 +493,23 @@
     ov.classList.remove('hidden');
     p.classList.toggle('interactive', S.status !== 'crash');
     p.classList.toggle('crashed', S.status === 'crash');
-    if (S.status === 'ready') {
+    if (S.status === 'ready' && needName()) { // first start: ask for the name used in the leaderboard
+      p.innerHTML = `<h1>🏍️ Moto Trial</h1>
+        <h2>Willkommen! 👋</h2>
+        <p>Wie heißt du? Mit diesem Namen erscheinst du in der <b>Bestenliste</b>.</p>
+        <p><input id="welcomeName" class="bigname" maxlength="16" placeholder="Dein Name" autocomplete="nickname" enterkeyhint="go"></p>
+        <p><button class="big" id="welcomeOk">Los geht's ▶</button></p>
+        <p><button class="mt" id="welcomeSkip">Später</button></p>
+        <p class="hint">Du kannst den Namen jederzeit unter 🏆 Bestenliste ändern.</p>`;
+      const inp = $('welcomeName'), ok = $('welcomeOk');
+      const done = name => { profile.name = (name || '').replace(/\s+/g, ' ').trim().slice(0, 16) || 'Spieler'; profile.named = true; saveProfile(); updatePanel(); };
+      inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } };
+      inp.oninput = () => ok.classList.toggle('dim', !inp.value.trim());
+      ok.classList.add('dim');
+      ok.onclick = e => { e.stopPropagation(); done(inp.value); };
+      $('welcomeSkip').onclick = e => { e.stopPropagation(); done(''); };
+      setTimeout(() => { try { inp.focus(); } catch (err) {} }, 50);
+    } else if (S.status === 'ready') {
       p.innerHTML = `<h1>🏍️ Moto Trial</h1>${versionHtml()}${tabsHtml()}` + (menuTab === 'levels' ? levelsHtml() : menuTab === 'scores' ? scoresHtml() : garageHtml()) + footHtml();
       bindMenu(p);
     } else if (S.status === 'crash') {
