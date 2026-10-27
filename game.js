@@ -958,12 +958,37 @@
       B.checkpoints.push(cp); later(gi => (cp.gi = gi));
       return B;
     };
-    B.finishLine = len => {
+    B.finishLine = (len, bonus) => {
       const x = X();
       B.flat(len || 500);
-      B.finish = { x: x + 200, dir: 1 };
+      B.finish = { x: x + 200, dir: 1, bonus: !!bonus };
       later(gi => (B.finish.gi = gi));
+      if (bonus) B.bonusDrop();
       B.end();
+      return B;
+    };
+    // bonus after the finish: over a ramp into a deep sky shaft, steer with gas (right) / brake (left)
+    B.bonusDrop = () => {
+      B.flat(250);
+      const x0 = X(), y0 = Y();
+      B.p.cubic(x0 + 80, y0, x0 + 140, y0 + 40, x0 + 220, y0 + 120); // ramp down and off
+      const ex = X(), ey = Y();
+      B.end();
+      const zx = ex - 150, zw = 1300, depth = 3600, padY = ey + depth;
+      B.bonusZone = { x: zx, y: ey - 200, w: zw, h: depth + 200, padY };
+      // coins in the air: mostly 1, some 3 and 5, rarely 20 (fixed pattern, no level randomness used)
+      const h = k => { const v = Math.sin(k * 91.73 + 7.1) * 43758.5453; return v - Math.floor(v); };
+      for (let y = ey + 220, k = 0; y < padY - 180; y += 70, k++) {
+        const n = 1 + Math.floor(h(k) * 3);
+        for (let j = 0; j < n; j++) {
+          const r = h(k * 7 + j * 3.3), q = h(k * 13 + j * 5.1);
+          const v = q < 0.03 ? 20 : q < 0.15 ? 5 : q < 0.4 ? 3 : 1;
+          B.coins.push({ x: zx + 90 + r * (zw - 180), y: y + j * 25, v });
+        }
+      }
+      B.decor.bonus = B.bonusZone;
+      B.begin(zx, padY); B.p.kind('soft').line(zx + zw, padY).kind('normal');
+      later(gi => (B.bonusEnd = gi));
       return B;
     };
     B.sections = []; B.saws_ = []; B.crush = []; B.lowG = []; B.birds_ = []; B.floaters = []; B.cannons_ = []; B.doors_ = []; B.buttons_ = [];
@@ -975,7 +1000,7 @@
       portals: B.portals, waters: B.waters, crushers: B.crush, lowG: B.lowG, theme: B.theme, birds: B.birds_, floaters: B.floaters,
       cannons: B.cannons_, doors: B.doors_, piranhas: B.piranhas_, hail: B.hail_, pendulums: B.pend_, dropSpikes: B.drops_, special: B.special,
       seesaws: B.seesaws_, fortunes: B.fortunes_, wheelSwitches: B.wheelSw_, slings: B.slings_, checkpoints: B.checkpoints, finish: B.finish,
-      deathY: B.deathY, deathRects: B.deathRects, decor: B.decor, hints: B.hints, sections: B.sections,
+      deathY: B.deathY, deathRects: B.deathRects, decor: B.decor, hints: B.hints, sections: B.sections, bonusZone: B.bonusZone, bonusEnd: B.bonusEnd,
     });
     return B;
   }
@@ -1050,7 +1075,7 @@
       .flapsBridge(4, 180).flat(150)
       .conv(300).flat(60).loop(140, true).flat(300, 90)
       .kickerGap({ h: 80, gap: 450, drop: 100 }).flat(100)
-      .finishLine(600);
+      .finishLine(600, true);
     return B.build();
   }
 
@@ -1292,7 +1317,7 @@
       sec.g1 = B.gr.length; sec.x1 = B.x(); B.sections.push(sec);
     }
     B.mark(); run(450);
-    B.finishLine(700);
+    B.finishLine(700, n % 10 === 5);
     if (special) B.coins.forEach((c, i) => { if (i % 6 === 3) c.v = 5; });
     return B.build();
   }
@@ -1354,7 +1379,7 @@
       L.doors.forEach(d => { d.open = 0; d.opening = false; });
       L.floaters.forEach(f => (f.taken = false));
       L.dropSpikes.forEach(d => { d.state = 'hang'; d.y = d.y0; d.vy = 0; });
-      S.float = null; S.fly = null; S.cannonCd = 0; S.wheels = 1; S.sling = null; S.slingShot = undefined; S.slingCd = 0;
+      S.float = null; S.fly = null; S.cannonCd = 0; S.wheels = 1; S.bonus = false; S.finishTime = undefined; S.sling = null; S.slingShot = undefined; S.slingCd = 0;
       L.seesaws.forEach(w => { w.rot = -w.maxA; w.omega = 0; const g = L.grounds[w.gi]; g.rot = w.rot; transformGround(g); });
       L.fortunes.forEach(f => (f.used = false));
       L.grounds.forEach(g => { if (g.flipped) { g.base.forEach(q => (q[3] = -q[3])); g.flipped = false; transformGround(g); } });
@@ -1501,6 +1526,15 @@
 
       let gf = 1;
       for (const z of L.lowG) if (inRectP(S.x, S.y, z)) gf = z.g;
+      const bz = L.bonusZone;
+      if (S.bonus && bz && S.x > bz.x - 50 && S.x < bz.x + bz.w + 50 && S.y > bz.y) { // bonus sky dive: slow fall, steer left/right
+        if (inp.up) S.vx += 1200 * dt;
+        if (inp.down) S.vx -= 1200 * dt;
+        S.vx *= Math.exp(-1.5 * dt); S.vx = Math.max(-420, Math.min(420, S.vx));
+        S.vy += (230 - S.vy) * Math.min(1, 2 * dt) - G * gf * dt;
+        if (S.x < bz.x + 40) { S.x = bz.x + 40; S.vx = Math.abs(S.vx) * 0.3; }
+        if (S.x > bz.x + bz.w - 40) { S.x = bz.x + bz.w - 40; S.vx = -Math.abs(S.vx) * 0.3; }
+      }
       if (S.fly) { // flight mode: steady forward speed, gas = up, brake = down
         S.fly.t -= dt;
         S.vx += (360 - S.vx) * Math.min(1, 3 * dt);
@@ -1727,7 +1761,7 @@
       for (const c of coins) {
         if (c.taken) continue;
         if (Math.hypot(c.x - P.center[0], c.y - P.center[1]) < 42) {
-          c.taken = true; c.cp = !!S.checkpoint; S.events.push(c.v > 1 ? 'star' : 'coin');
+          c.taken = true; c.cp = !!S.checkpoint; S.lastCoin = c; S.events.push(c.v > 1 ? 'star' : 'coin');
         }
       }
       // checkpoints
@@ -1740,7 +1774,11 @@
           }
         }
         const f = L.finish;
-        if (S.gi === f.gi && (S.x - f.x) * f.dir >= 0) { S.status = 'finish'; S.events.push('finish'); }
+        if (S.gi === f.gi && (S.x - f.x) * f.dir >= 0 && !S.bonus) {
+          if (f.bonus) { S.bonus = true; S.finishTime = S.time; S.events.push('bonus'); } // time stops here, the bonus is extra
+          else { S.status = 'finish'; S.events.push('finish'); }
+        }
+        if (S.bonus && S.gi === L.bonusEnd) { S.status = 'finish'; S.events.push('finish'); }
       }
     }
 
