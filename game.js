@@ -15,6 +15,7 @@
   const REV_ACC = 650, REV_MAX = 320;   // reverse gear
   const HEAD = 62, WHEEL_R = 14, WHEEL_X = 26;
   const SLING = { mid: 0.8, amp: 0.5, aimSpeed: 1.4, pmin: 500, pmax: 1500, powerTime: 1.2 };
+  const AIM = { time: 3.5, turn: 0.7, min: 0.15, max: 1.3 };
   const PI = Math.PI;
 
   // ---------- path helpers ----------
@@ -849,10 +850,10 @@
       B.begin(lx, ly).flat(land);
       return B;
     };
-    B.flight = (len, centers) => { // wings: fly through gates, gas = up, brake = down
+    B.flight = (len, centers, kind) => { // wings: fly through gates, gas = up, brake = down
       const x = X(), y = Y();
       B.flat(80);
-      B.floaters.push({ x: x + 50, y: y - 45, kind: 'wings' });
+      B.floaters.push({ x: x + 50, y: y - 45, kind: kind || 'wings' });
       hint({ x0: x - 300, x1: x + 80, v: 300 });
       B.end();
       const sx = x + 80, ex = sx + len, top = y - 460, floor = y + 260;
@@ -861,13 +862,13 @@
       const gates = [];
       const n = centers.length;
       for (let i = 0; i < n; i++) {
-        const gx = sx + len * (i + 1) / (n + 1), cy = y + centers[i], gh = 210;
+        const gx = sx + len * (i + 1) / (n + 1), cy = y + centers[i], gh = kind === 'hot' ? 250 : 210;
         gates.push([gx, cy]);
         B.spikes.push({ x: gx - 25, y: top + 40, w: 50, h: cy - gh / 2 - top - 40, dir: 'pillarTop' });
         B.spikes.push({ x: gx - 25, y: cy + gh / 2, w: 50, h: floor - 70 - cy - gh / 2, dir: 'pillarBottom' });
         B.coins.push({ x: gx, y: cy });
       }
-      B.hints.push({ flight: true, gates, landX: ex + 40, landY: y });
+      B.hints.push({ flight: true, hot: kind === 'hot', gates, landX: ex + 40, landY: y });
       B.walls.push(W(ex, y + 8, ex, floor));
       B.decor.hatch.push([ex, y, 30, floor - y]);
       B.begin(ex, y); B.p.kind('soft').line(ex + 400, y).kind('normal');
@@ -950,6 +951,72 @@
       B.begin(tx + 40, ty + 70).flat(450);
       return B;
     };
+    // ---- world 2 sections (levels 61–70) ----
+    B.vineJump = (n, len) => { // drive off the edge, grab the vines, swing (gas) and let go (brake) at the right moment
+      n = n || 2; len = len || 320;
+      const x = X(), y = Y();
+      hint({ x0: x - 350, x1: x, v: 330 });
+      B.end();
+      // the first vine end hangs right on the path of a bike leaving the edge at ~330 px/s
+      const gap = 560, first = x + 110, endY = y + 15, landX = first + (n - 1) * gap + 500;
+      for (let i = 0; i < n; i++) {
+        const px = first + i * gap, idx = B.vines_.length;
+        B.vines_.push({ px, py: endY - len, len });
+        B.hints.push({ vine: idx, next: i < n - 1 ? idx + 1 : null, landX, landY: y });
+        B.coins.push({ x: px + 150, y: endY - 60 }, { x: px + 280, y: endY - 150 });
+      }
+      B.spikes.push({ x: x, y: y + 230, w: landX - x, h: 70, dir: 'lava' });
+      B.walls.push(W(x, y + 8, x, y + 300), W(landX, y + 8, landX, y + 300));
+      B.decor.hatch.push([x - 30, y, 30, 300], [landX, y, 30, 300], [x, endY - len - 30, landX - x, 30]);
+      B.begin(landX, y).flat(400);
+      return B;
+    };
+    B.aimCannonShot = dist => { // aim the barrel yourself (gas up / brake down), it fires when the countdown runs out
+      dist = dist || 1100;
+      B.flat(120);
+      const cx = X(), y = Y();
+      B.flat(60);
+      const ex = X(), pad = 280, lx = cx + dist - pad / 2;
+      // power so that a medium angle lands in the middle of the pad
+      const A0 = 0.75, mx = cx + Math.cos(A0) * 80, my = y - 46 - Math.sin(A0) * 80;
+      const power = idealSpeed(mx, my, Math.cos(A0), -Math.sin(A0), y, cx + dist);
+      const i = B.aimCannons_.length;
+      B.aimCannons_.push({ x: cx, y, power });
+      B.hints.push({ aim: i, angle: A0 });
+      hint({ x0: cx - 300, x1: ex, v: 250 });
+      const arc = []; ballistic(mx, my, Math.cos(A0) * power, -Math.sin(A0) * power, 120, 30, (px, py) => py > y - 10 && px > lx, arc, true);
+      if (B.special && arc.length) { const top = arc.reduce((a, c) => (c.y < a.y ? c : a)); top.v = 5; }
+      B.coins.push(...arc.filter((c, k) => k % 2 === 0));
+      B.end();
+      pit(ex, lx, y, 260, true);
+      B.begin(lx, y); B.p.kind('soft').line(lx + pad, y).kind('normal');
+      return B.flat(250);
+    };
+    B.hotBalloonRide = (len, centers) => B.flight(len, centers, 'hot');
+    B.sharkLake = (len, n) => { // a deep lake with sharks patrolling — cross when the way is clear
+      const x = X(), y = Y(), depth = 170;
+      B.pool(len, depth);
+      B.hints.pop();
+      // sharks patrol the whole lake near the surface: safe on the bottom, dangerous at the shores
+      const run = Math.max(210, depth * 2.2), ax = len / 2 - run * 0.35;
+      for (let i = 0; i < n; i++) B.sharks_.push({ cx: x + len / 2, y: y + 58, ax, speed: 0.8 + 0.15 * i, phase: i * 2.4 });
+      timed(x - 200, x + len, 300);
+      B.decor.warns.push({ x: x - 60, y: y - 100 });
+      return B;
+    };
+    B.dragonCave = (len, gaps) => { // an angry dragon at the end of the cave spits fireballs: JUMP over them
+      const x = X(), y = Y();
+      const i = B.dragons_.length;
+      B.dragons_.push({ x: x + len - 200, y, x0: x + 20, speed: 400, gaps: gaps || [1.8, 2.2, 1.9], phase: 0.5, body: x + len - 110 });
+      B.jumpZones_.push({ x0: x - 100, x1: x + len + 80, y0: y - 400, y1: y + 40 });
+      B.decor.caves.push({ x, y, w: len });
+      B.hints.push({ dragon: i, x0: x - 200, x1: x + len + 60, v: 300 });
+      const dh = B.hints[B.hints.length - 1];
+      later(gi => (dh.gi = gi));
+      B.decor.hatch.push([x, y - 300, len + 40, 40]);
+      B.spikes.push({ x: x + 10, y: y - 260, w: len, h: 30, dir: 'down' });
+      return B.flat(len + 60, 160);
+    };
     B.mark = () => { B.guard = X(); return B; };
     B.x = X; B.y = Y; B.bounds = () => { let lo = Infinity, hi = -Infinity; for (const g of B.gr) for (const q of g.pts) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); } if (B.p) for (const q of B.p.pts) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); } return [lo, hi]; };
     B.checkpoint = () => {
@@ -994,12 +1061,14 @@
     B.sections = []; B.saws_ = []; B.crush = []; B.lowG = []; B.birds_ = []; B.floaters = []; B.cannons_ = []; B.doors_ = []; B.buttons_ = [];
     B.piranhas_ = []; B.hail_ = []; B.pend_ = []; B.drops_ = []; B.decor.clouds = []; B.decor.cables = [];
     B.seesaws_ = []; B.fortunes_ = []; B.wheelSw_ = []; B.decor.pivots = []; B.slings_ = [];
+    B.vines_ = []; B.aimCannons_ = []; B.sharks_ = []; B.dragons_ = []; B.jumpZones_ = []; B.decor.caves = [];
     B.build = () => ({
       name: B.name, start: B.start, grounds: B.gr, walls: B.walls, coins: B.coins, spikes: B.spikes,
       gates: [], buttons: B.buttons.concat(B.buttons_), movers: B.movers, flaps: B.flaps, saws: B.saws_, fans: B.fans,
       portals: B.portals, waters: B.waters, crushers: B.crush, lowG: B.lowG, theme: B.theme, birds: B.birds_, floaters: B.floaters,
       cannons: B.cannons_, doors: B.doors_, piranhas: B.piranhas_, hail: B.hail_, pendulums: B.pend_, dropSpikes: B.drops_, special: B.special,
-      seesaws: B.seesaws_, fortunes: B.fortunes_, wheelSwitches: B.wheelSw_, slings: B.slings_, checkpoints: B.checkpoints, finish: B.finish,
+      seesaws: B.seesaws_, fortunes: B.fortunes_, wheelSwitches: B.wheelSw_, slings: B.slings_,
+      vines: B.vines_, aimCannons: B.aimCannons_, sharks: B.sharks_, dragons: B.dragons_, jumpZones: B.jumpZones_, checkpoints: B.checkpoints, finish: B.finish,
       deathY: B.deathY, deathRects: B.deathRects, decor: B.decor, hints: B.hints, sections: B.sections, bonusZone: B.bonusZone, bonusEnd: B.bonusEnd,
     });
     return B;
@@ -1205,11 +1274,15 @@
     44: 'Eiszeit', 45: 'Feuerwerk', 46: 'Chaos', 47: 'Präzision', 48: 'Höllenritt', 49: 'Der letzte Weg', 50: '⭐ Extra: Endgegner',
     51: '☠ Wüstensturm', 52: '☠ Mondbasis', 53: '☠ Sonnenglut', 54: '☠ Tiefsee', 55: '☠ Strandparty', 56: '☠ Dschungeltempel',
     57: '☠ Gletscherspalte', 58: '☠ Neonstadt', 59: '☠ Vulkanherz', 60: '⭐☠ Extra: Weltall',
+    61: '🐉 Lianenwald', 62: '🐉 Drachenhöhle', 63: '🐉 Haifischbucht', 64: '🐉 Kanonenfels', 65: '🐉 Ballonfahrt',
+    66: '🐉 Feuerschlucht', 67: '🐉 Tiefer See', 68: '🐉 Urwaldriesen', 69: '🐉 Drachenhort', 70: '⭐🐉 Extra: Drachenkönig',
   };
   const FOCUS = {
     51: ['seesaw', 'fork', 'lava'], 52: ['flight', 'moon', 'moonTramp'], 53: ['lift', 'lava', 'cannon'], 54: ['tunnel', 'carpet', 'piranha'],
     55: ['fortune', 'fork', 'tramp', 'balloon'], 56: ['secret', 'fork', 'drops', 'birds'], 57: ['seesaw', 'tunnel', 'carpet', 'hail'],
     58: ['flight', 'lift', 'crush'], 59: ['fork', 'secret', 'lava', 'lift', 'seesaw'], 60: ['lift', 'seesaw', 'fork', 'flight', 'tunnel', 'carpet', 'secret', 'fortune'],
+    61: ['vine'], 62: ['dragon'], 63: ['shark'], 64: ['aim'], 65: ['hot'], 66: ['dragon', 'vine'], 67: ['shark', 'hot'], 68: ['vine', 'aim'],
+    69: ['dragon', 'shark', 'aim'], 70: ['vine', 'aim', 'hot', 'shark', 'dragon'],
     24: ['saws', 'birds', 'drops'], 25: ['lava', 'cannon'], 26: ['elev', 'fanUp', 'bubble'], 27: ['kick', 'stairs'], 28: ['tramp', 'cannon', 'balloon', 'ballpit'],
     29: ['birds', 'piranha', 'pendulum'], 31: ['crush', 'rev', 'saws'], 32: ['moon', 'moonTramp'], 33: ['pool', 'piranha', 'ballpit'], 34: ['cannon'],
     35: ['lava', 'kick'], 36: ['pendulum', 'drops', 'wheel'], 37: ['hail', 'kick'], 38: ['birds'], 39: ['door', 'mover', 'elev'], 41: ['loop', 'wall', 'hump'],
@@ -1218,17 +1291,18 @@
   };
   // every generated level gets its own background (themes are purely visual)
   const THEME_CYCLE = ['desert', 'beach', 'forest', 'snow', 'sunset', 'city', 'underwater', 'volcano', 'moon', 'space', 'sun', 'candy'];
-  const HARD_THEME = { 51: 'desert', 52: 'moon', 53: 'sun', 54: 'underwater', 55: 'beach', 56: 'forest', 57: 'snow', 58: 'city', 59: 'volcano', 60: 'space' };
+  const HARD_THEME = { 51: 'desert', 52: 'moon', 53: 'sun', 54: 'underwater', 55: 'beach', 56: 'forest', 57: 'snow', 58: 'city', 59: 'volcano', 60: 'space',
+    61: 'jungle', 62: 'cave', 63: 'beach', 64: 'jungle', 65: 'sunset', 66: 'cave', 67: 'underwater', 68: 'jungle', 69: 'cave', 70: 'volcano' };
   function genLevel(n, seed) {
-    const hard = n > 50;
-    const rnd = rng(seed), d = hard ? Math.min(1.45, 1.15 + (n - 51) * 0.03 + (n % 10 === 0 ? 0.1 : 0)) : Math.min(1.15, (n - 11) / 39 + (n % 10 === 0 ? 0.25 : 0));
+    const hard = n > 50, world2 = n > 60;
+    const rnd = rng(seed), d = world2 ? 1.45 + (n - 61) * 0.02 + (n === 70 ? 0.05 : 0) : hard ? Math.min(1.45, 1.15 + (n - 51) * 0.03 + (n % 10 === 0 ? 0.1 : 0)) : Math.min(1.15, (n - 11) / 39 + (n % 10 === 0 ? 0.25 : 0));
     const special = n % 10 === 0;
     const B = Builder(`Level ${n} · ${GEN_NAMES[n]}`);
     B.special = special;
     B.ceilMargin = Math.max(16, 28 - 12 * d);
     B.maxApproach = 960;
     B.theme = hard ? HARD_THEME[n] : n % 6 === 0 ? 'night' : THEME_CYCLE[(n - 11) % THEME_CYCLE.length];
-    const icy = hard ? n === 57 : n % 8 === 3 || n === 44 || n === 37;
+    const icy = world2 ? false : hard ? n === 57 : n % 8 === 3 || n === 44 || n === 37;
     const lavaOn = n >= 15, lavaLevel = n >= 15 && (n % 5 === 0 || rnd() < 0.2);
     if (lavaLevel) B.lavaPits = true;
     const pick = a => a[Math.floor(rnd() * a.length)];
@@ -1281,6 +1355,15 @@
       carpet: () => B.spikeCarpet(R(500, 800)),
       fortune: () => B.fortuneWheel(),
       secret: () => B.secretBelt(),
+      vine: () => B.vineJump(I(2, 4), R(330, 370)),
+      aim: () => B.aimCannonShot(R(1000, 1500)),
+      hot: () => {
+        const k = I(4, 6), c = []; let v = R(-120, 20);
+        for (let i = 0; i < k; i++) { c.push(Math.round(v)); v = Math.max(-180, Math.min(50, v + R(-110, 110))); }
+        B.hotBalloonRide(520 * (k + 1), c);
+      },
+      shark: () => B.sharkLake(R(1000, 1300), I(1, 2)),
+      dragon: () => B.dragonCave(R(1300, 1800), [R(1.8, 2.4), R(1.8, 2.4), R(1.8, 2.4)]),
     };
     const base = ['kick', 'tramp', 'saws', 'crush', 'flaps', 'stairs', 'bumps', 'loop', 'hump', 'wall', 'pool', 'elev', 'mover', 'shaft', 'drop', 'fanUp', 'moon', 'moonTramp', 'wheel', 'rev'];
     const unlocked = Object.keys(INTRO).filter(k => Number(k) <= n).map(k => INTRO[k]);
@@ -1289,7 +1372,8 @@
     const focusPick = () => focusList ? pick(focusList) : null;
     const focus = focusPick();
     const extreme = ['lift', 'seesaw', 'fork', 'flight', 'tunnel', 'carpet', 'secret'];
-    const pool = hard ? base.concat(unlocked, extreme, extreme) : base.concat(unlocked);
+    const w2 = ['vine', 'aim', 'hot', 'shark', 'dragon'];
+    const pool = world2 ? base.concat(unlocked, extreme, w2, w2, w2) : hard ? base.concat(unlocked, extreme, extreme) : base.concat(unlocked);
     const count = hard ? 15 + (special ? 4 : 0) : 7 + Math.round(7 * Math.min(1, d)) + (special ? 3 : 0);
     const cpEvery = d < 0.5 ? 3 : 4;
     B.begin(0, 0).flat(120).startHere(special ? 'EXTRA' : 'START').flat(250, 80);
@@ -1322,9 +1406,9 @@
     return B.build();
   }
   // seeds picked by the offline validator (every level is solvable by the test bot)
-  const SEEDS = { 11: 11000, 12: 12000, 13: 13000, 14: 14000, 15: 15000, 16: 16000, 17: 17000, 18: 18001, 19: 19000, 20: 20000, 21: 21000, 22: 22000, 23: 23000, 24: 24000, 25: 25000, 26: 26005, 27: 27007, 28: 28000, 29: 29000, 30: 30000, 31: 31000, 32: 32001, 33: 33000, 34: 34000, 35: 35007, 36: 36000, 37: 37004, 38: 38000, 39: 39002, 40: 40000, 41: 41000, 42: 42000, 43: 43000, 44: 44010, 45: 45000, 46: 46001, 47: 47000, 48: 48000, 49: 49001, 50: 50000, 51: 51000, 52: 52011, 53: 53003, 54: 54004, 55: 55000, 56: 56002, 57: 57017, 58: 58004, 59: 59000, 60: 60000 };
+  const SEEDS = { 11: 11000, 12: 12000, 13: 13000, 14: 14000, 15: 15000, 16: 16000, 17: 17000, 18: 18001, 19: 19000, 20: 20000, 21: 21000, 22: 22000, 23: 23000, 24: 24000, 25: 25000, 26: 26005, 27: 27007, 28: 28000, 29: 29000, 30: 30000, 31: 31000, 32: 32001, 33: 33000, 34: 34000, 35: 35007, 36: 36000, 37: 37004, 38: 38000, 39: 39002, 40: 40000, 41: 41000, 42: 42000, 43: 43000, 44: 44010, 45: 45000, 46: 46001, 47: 47000, 48: 48000, 49: 49001, 50: 50000, 51: 51000, 52: 52011, 53: 53003, 54: 54004, 55: 55000, 56: 56002, 57: 57017, 58: 58004, 59: 59000, 60: 60000, 61: 61001, 62: 62123, 63: 63000, 64: 64011, 65: 65000, 66: 66001, 67: 67001, 68: 68000, 69: 69006, 70: 70004 };
   const LEVELS = [level1, level2, level3, level4, level5, level6, level7, level8, level9, level10];
-  for (let n = 11; n <= 60; n++) LEVELS.push(() => genLevel(n, SEEDS[n] !== undefined ? SEEDS[n] : n * 1000));
+  for (let n = 11; n <= 70; n++) LEVELS.push(() => genLevel(n, SEEDS[n] !== undefined ? SEEDS[n] : n * 1000));
 
   // ---------- geometry ----------
   function segIntersect(px, py, qx, qy, s) {
@@ -1341,7 +1425,7 @@
 
   // ---------- game ----------
   function createGame(levelIndex) {
-    const L = Object.assign({ gates: [], buttons: [], movers: [], flaps: [], saws: [], fans: [], portals: [], waters: [], crushers: [], lowG: [], birds: [], floaters: [], cannons: [], doors: [], piranhas: [], hail: [], pendulums: [], dropSpikes: [], seesaws: [], fortunes: [], wheelSwitches: [], slings: [], deathRects: [], walls: [] }, typeof levelIndex === 'function' ? levelIndex() : LEVELS[levelIndex || 0]());
+    const L = Object.assign({ gates: [], buttons: [], movers: [], flaps: [], saws: [], fans: [], portals: [], waters: [], crushers: [], lowG: [], birds: [], floaters: [], cannons: [], doors: [], piranhas: [], hail: [], pendulums: [], dropSpikes: [], seesaws: [], fortunes: [], wheelSwitches: [], slings: [], vines: [], aimCannons: [], sharks: [], dragons: [], jumpZones: [], deathRects: [], walls: [] }, typeof levelIndex === 'function' ? levelIndex() : LEVELS[levelIndex || 0]());
     const coins = L.coins.map(c => ({ x: c.x, y: c.y, v: c.v || 1, taken: false }));
     L.gates.forEach(g => { g.open = 0; g.opening = false; });
 
@@ -1380,6 +1464,7 @@
       L.floaters.forEach(f => (f.taken = false));
       L.dropSpikes.forEach(d => { d.state = 'hang'; d.y = d.y0; d.vy = 0; });
       S.float = null; S.fly = null; S.cannonCd = 0; S.wheels = 1; S.bonus = false; S.finishTime = undefined; S.sling = null; S.slingShot = undefined; S.slingCd = 0;
+      S.vine = null; S.vineCd = {}; S.aim = null; S.hot = null; S.jumpHeld = false;
       L.seesaws.forEach(w => { w.rot = -w.maxA; w.omega = 0; const g = L.grounds[w.gi]; g.rot = w.rot; transformGround(g); });
       L.fortunes.forEach(f => (f.used = false));
       L.grounds.forEach(g => { if (g.flipped) { g.base.forEach(q => (q[3] = -q[3])); g.flipped = false; transformGround(g); } });
@@ -1526,6 +1611,23 @@
 
       let gf = 1;
       for (const z of L.lowG) if (inRectP(S.x, S.y, z)) gf = z.g;
+      if (S.hot) { // hot-air balloon: gas = burner (up), brake = vent (down), the wind pushes you on
+        S.hot.t -= dt;
+        S.vx += (170 - S.vx) * Math.min(1, 2 * dt);
+        S.vy += (inp.up ? -560 : inp.down ? 480 : 150) * dt;
+        S.vy *= Math.exp(-0.6 * dt); S.vy = Math.max(-280, Math.min(280, S.vy)) - G * gf * dt;
+        if (S.hot.t <= 0) S.hot = null;
+      }
+      for (let i = 0; i < L.vines.length; i++) { // grab a vine when you fly past its end
+        if (S.vineCd[i] > 0) continue;
+        const vn = L.vines[i], th = vineIdle(vn), ex = vn.px + vn.len * Math.sin(th), ey = vn.py + vn.len * Math.cos(th);
+        if (Math.hypot(S.x - ex, S.y - 30 - ey) < 70) {
+          const a = Math.atan2(S.x - vn.px, S.y - 30 - vn.py);
+          S.mode = 'vine'; S.vine = { i, th: a, om: (S.vx * Math.cos(a) - S.vy * Math.sin(a)) / vn.len, held: inp.down };
+          S.float = null; S.fly = null; S.hot = null; S.events.push('vine');
+          return;
+        }
+      }
       const bz = L.bonusZone;
       if (S.bonus && bz && S.x > bz.x - 50 && S.x < bz.x + bz.w + 50 && S.y > bz.y) { // bonus sky dive: slow fall, steer left/right
         if (inp.up) S.vx += 1200 * dt;
@@ -1604,7 +1706,7 @@
           if (ang > LAND_ANGLE_MAX) { crash('Falsch gelandet! Achte auf dein Tempo.'); return; }
           if (vn > IMPACT_MAX) { crash('Zu harte Landung! Weniger Tempo.'); return; }
         }
-        S.mode = 'ground'; S.float = null; S.fly = null; S.slingShot = undefined;
+        S.mode = 'ground'; S.float = null; S.fly = null; S.hot = null; S.slingShot = undefined;
         S.u = Math.hypot(S.x - s.ax, S.y - s.ay);
         S.v = rvx * s.tx + rvy * s.ty;
         S.events.push('land');
@@ -1626,6 +1728,8 @@
       for (const pd of L.pendulums) { const p = pendulumPos(pd, t); out.push({ c: [p[0], p[1], pd.r], msg: 'Vom Pendel getroffen!' }); }
       for (const f of L.piranhas) { const p = piranhaPos(f, t); out.push({ c: [p[0], p[1], 22], msg: 'Piranha-Biss!' }); }
       for (const h of L.hail) { const p = hailPos(h, t); if (p) out.push({ c: [p[0], p[1], 15], msg: 'Vom Eisregen getroffen!' }); }
+      for (const sh of L.sharks) { const p = sharkPos(sh, t); out.push({ c: [p[0] - 14, p[1], 24], msg: 'Vom Hai gefressen!' }, { c: [p[0] + 18, p[1], 22], msg: 'Vom Hai gefressen!' }); }
+      for (const dg of L.dragons) for (const fb of fireballs(dg, t)) out.push({ c: [fb[0], fb[1], 22], msg: 'Vom Feuerball des Drachen erwischt!' });
       return out;
     }
     function birdPos(b, t) { const a = b.phase + b.speed * t; return [b.cx + b.ax * Math.sin(a), b.cy + b.ay * Math.sin(2 * a), Math.cos(a)]; }
@@ -1635,12 +1739,59 @@
       const fr = (((t / h.period + h.phase) % 1) + 1) % 1, y = h.top + fr * (h.bottom - h.top + 60) - 30;
       return y >= h.top && y <= h.bottom ? [h.x, y] : null;
     }
+    function sharkPos(sh, t) { const a = sh.phase + sh.speed * t; return [sh.cx + sh.ax * Math.sin(a), sh.y + 6 * Math.sin(a * 3), Math.cos(a)]; }
+    // the dragon spits fireballs that roll along the cave floor towards you
+    function fireballs(dg, t) {
+      const out = [], gaps = dg.gaps, cyc = gaps.reduce((a, b) => a + b, 0);
+      const life = (dg.x - dg.x0) / dg.speed;
+      const base = Math.floor((t - dg.phase) / cyc);
+      for (let c = base - 1; c <= base; c++) {
+        let st = dg.phase + c * cyc;
+        for (const gp of gaps) {
+          const age = t - st;
+          if (age >= 0 && age < life) out.push([dg.x - dg.speed * age, dg.y - 26, age]);
+          st += gp;
+        }
+      }
+      return out;
+    }
+    function vineIdle(vn) { return 0.12 * Math.sin(1.3 * S.clock + vn.px * 0.01); }
     function crusherRect(c, t) {
       if (t === undefined) t = S.clock;
       const yb = c.ground - 85 + 85 * Math.sin(c.phase + c.speed * t); // bottom edge of the block
       return { x: c.x, y: yb - 140, w: c.w, h: 140 };
     }
     // slingshot: the arrow swings until you press gas (direction), then the power swings until you let go
+    // vine: swing like a pendulum, gas pumps the swing, brake lets go
+    function stepVine(dt, inp) {
+      const vg = S.vine, vn = L.vines[vg.i];
+      if (!inp.down) vg.held = false;
+      vg.om += (-(G / vn.len) * Math.sin(vg.th) + (inp.up ? 2.4 * (vg.om >= 0 ? 1 : -1) : 0)) * dt;
+      vg.om *= Math.exp(-0.04 * dt);
+      vg.th += vg.om * dt;
+      if (Math.abs(vg.th) > 1.4) { vg.th = Math.sign(vg.th) * 1.4; vg.om = 0; }
+      S.x = vn.px + vn.len * Math.sin(vg.th); S.y = vn.py + vn.len * Math.cos(vg.th) + 30; S.theta = -vg.th * 0.5; S.facing = 1;
+      if (inp.down && !vg.held) {
+        S.mode = 'air'; S.airTime = 0; S.leftGi = -1;
+        S.vx = vn.len * vg.om * Math.cos(vg.th); S.vy = -vn.len * vg.om * Math.sin(vg.th);
+        S.vineCd[vg.i] = 0.8; S.vine = null; S.events.push('vineOff');
+      }
+    }
+    // aimable cannon: gas raises the barrel, brake lowers it, fires when the countdown ends
+    function stepAim(dt, inp) {
+      const am = S.aim, c = L.aimCannons[am.i];
+      if (inp.up) am.angle += AIM.turn * dt;
+      if (inp.down) am.angle -= AIM.turn * dt;
+      am.angle = Math.max(AIM.min, Math.min(AIM.max, am.angle));
+      S.theta = -am.angle;
+      am.t -= dt;
+      if (am.t <= 0) {
+        const ca = Math.cos(am.angle), sa = Math.sin(am.angle);
+        S.mode = 'air'; S.airTime = 0; S.leftGi = -1; S.cannonCd = 1.2;
+        S.x = c.x + ca * 80; S.y = c.y - 46 - sa * 80; S.vx = ca * c.power; S.vy = -sa * c.power;
+        S.aim = null; S.events.push('cannon');
+      }
+    }
     function stepSling(dt, inp) {
       const sg = S.sling;
       if (!inp.up) sg.armed = true;
@@ -1702,6 +1853,7 @@
         if (f.taken || Math.hypot(P.center[0] - f.x, P.center[1] - f.y) > 50) continue;
         f.taken = true; S.events.push(f.kind);
         if (f.kind === 'wings') { S.fly = { t: 30 }; S.float = null; }
+        else if (f.kind === 'hot') { S.hot = { t: 60 }; S.float = null; }
         else S.float = { kind: f.kind, t: f.kind === 'balloon' ? 4.2 : 2.8 };
         if (S.mode === 'ground') { syncFromGround(); takeoff(S.vx - L.grounds[S.gi].vx, -80); }
       }
@@ -1740,6 +1892,16 @@
           S.mode = 'air'; S.airTime = 0; S.leftGi = -1;
           S.x = pt.bx; S.y = pt.by; S.vx = sp; S.vy = 0; S.theta = 0; S.facing = 1;
           S.portalCd = 0.5; S.events.push('portal');
+          return;
+        }
+      }
+      for (const k in S.vineCd) if (S.vineCd[k] > 0) S.vineCd[k] -= 1 / 240;
+      if (S.mode === 'ground' && S.cannonCd <= 0) for (let i = 0; i < L.aimCannons.length; i++) {
+        const c = L.aimCannons[i];
+        if (Math.abs(S.x - c.x) < 24 && Math.abs(S.y - c.y) < 20) {
+          S.mode = 'aim'; S.v = 0; S.vx = 0; S.vy = 0; S.x = c.x; S.y = c.y - 46; S.theta = -0.6;
+          S.aim = { i, angle: 0.6, t: AIM.time };
+          S.events.push('aimIn');
           return;
         }
       }
@@ -1838,6 +2000,14 @@
         if (d.state === 'fall') { d.vy += 1600 * dt; d.y += d.vy * dt; if (d.y >= d.ground) { d.state = 'gone'; S.events.push('shatter'); } }
       }
       if (S.mode === 'sling') { stepSling(dt, inp); return; }
+      if (S.mode === 'aim') { stepAim(dt, inp); return; }
+      if (S.mode === 'vine') { const pv = bikePoints(); stepVine(dt, inp); if (S.status === 'run' && S.mode === 'vine') hazards(pv); return; }
+      // jump button (only inside dragon caves)
+      if (!inp.jump) S.jumpHeld = false;
+      if (inp.jump && !S.jumpHeld && S.mode === 'ground' && L.jumpZones.some(z => S.x > z.x0 && S.x < z.x1 && S.y > z.y0 && S.y < z.y1)) {
+        S.jumpHeld = true; syncFromGround(); const sg = L.grounds[S.gi].segs[S.si];
+        takeoff(S.vx - L.grounds[S.gi].vx + sg.nx * 520, S.vy - L.grounds[S.gi].vy + sg.ny * 520); S.events.push('jump');
+      }
       const prev = bikePoints();
       const pre = { mode: S.mode, gi: S.gi, si: S.si, u: S.u, x: S.x, y: S.y };
       if (S.mode === 'ground') { syncFromGround(); stepGround(dt, inp); } else stepAir(dt, inp);
@@ -1858,10 +2028,10 @@
     }
 
     reset(true);
-    return { S, step, reset, bikePoints, coins, L, sawPos, crusherRect, timedShapes, birdPos, pendulumPos, piranhaPos, hailPos, placeOnGround, consts: { HEAD, WHEEL_R, WHEEL_X } };
+    return { S, step, reset, bikePoints, coins, L, sawPos, crusherRect, timedShapes, sharkPos, fireballs, vineIdle, birdPos, pendulumPos, piranhaPos, hailPos, placeOnGround, consts: { HEAD, WHEEL_R, WHEEL_X } };
   }
 
-  const api = { createGame, levelCount: LEVELS.length, Builder, genLevel, SEEDS, SLING };
+  const api = { createGame, levelCount: LEVELS.length, Builder, genLevel, SEEDS, SLING, AIM };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MotoTrial = api;
 })(this);

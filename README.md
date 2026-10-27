@@ -1,6 +1,6 @@
 # Moto Trial
 
-Motorrad-Geschicklichkeitsspiel im Browser (50 Level), gehostet auf Cloudflare Pages, installierbar als PWA.
+Motorrad-Geschicklichkeitsspiel im Browser (70 Level in 2 Welten), gehostet auf Cloudflare (Worker mit statischen Assets), installierbar als PWA.
 
 - `index.html` – Seite, Grafik, Menü, Steuerung
 - `game.js` – Physik, Level und Level-Generator
